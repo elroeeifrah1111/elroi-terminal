@@ -18,7 +18,50 @@ var currentSource = "";
 
 var drawingMode = "cursor";
 var pendingPoint = null;
-var previewSeries = null;  // תצוגה מקדימה חיה בזמן ציור (כמו ב-TradingView)
+/* תצוגה מקדימה של ציור — שכבת SVG מעל הגרף (בלי סדרות בספרייה).
+   הסיבה: יצירת LineSeries עם נקודה בודדת בלחיצה הראשונה הקפיאה את הטאב
+   עד מוות (לולאת main-thread בספריית הגרפים, ללא exception). ה-SVG בטוח לחלוטין. */
+var previewSvg = null;
+function previewLayer() {
+  if (previewSvg) return previewSvg;
+  previewSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  previewSvg.setAttribute("id", "draw-preview-layer");
+  previewSvg.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:6;";
+  $("chart").appendChild(previewSvg);
+  return previewSvg;
+}
+function clearPreview() {
+  if (previewSvg) previewSvg.innerHTML = "";
+}
+function drawPreview(p1, p2) {
+  // p1 = נקודה ראשונה (עיגול כחול כמו ב-TradingView); p2 = מיקום הסמן; p2=null -> רק עיגול
+  if (!candleSeries || !chart) return;
+  const svg = previewLayer();
+  const x1 = chart.timeScale().timeToCoordinate(p1.time);
+  const y1 = candleSeries.priceToCoordinate(p1.price);
+  let html = "";
+  if (x1 !== null && y1 !== null && isFinite(x1) && isFinite(y1)) {
+    html += `<circle cx="${x1.toFixed(1)}" cy="${y1.toFixed(1)}" r="5" fill="#2962ff" stroke="#fff" stroke-width="2"/>`;
+  }
+  if (p2) {
+    const x2 = chart.timeScale().timeToCoordinate(p2.time);
+    const y2 = candleSeries.priceToCoordinate(p2.price);
+    if ([x1, y1, x2, y2].every(v => v !== null && v !== undefined && isFinite(v))) {
+      const color = DRAW_COLORS[drawingMode] || "#2962ff";
+      html += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="1.5" stroke-dasharray="7 5"/>`;
+    }
+  }
+  svg.innerHTML = html;
+}
+function drawPreviewHline(price) {
+  if (!candleSeries || !chart) return;
+  const svg = previewLayer();
+  const y = candleSeries.priceToCoordinate(price);
+  const w = $("chart").getBoundingClientRect().width;
+  svg.innerHTML = (y !== null && isFinite(y) && w > 0)
+    ? `<line x1="0" y1="${y.toFixed(1)}" x2="${w.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${DRAW_COLORS.hline}" stroke-width="1.5" stroke-dasharray="7 5"/>`
+    : "";
+}
 var magnetOn = true;
 var drawings = [];          // {id,type,visible,color,points:[{time,price}],text}
 var drawSeq = 1;
@@ -326,17 +369,16 @@ function stopLive() {
 /* ---------------- crosshair / OHLC legend ---------------- */
 function onCrosshairMove(param) {
   lastCrossParam = param || null;
-  // עדכון תצוגה מקדימה של ציור דו-נקודתי (קו מגמה / פיבונאצ'י)
-  if (previewSeries && pendingPoint && (drawingMode === "trend" || drawingMode === "fib")) {
+  // תצוגה מקדימה של ציור: קו מגמה/פיבונאצ'י = קו מקווקו חי מהנקודה הראשונה לסמן;
+  // קו אופקי = קו מקווקו אופקי עוקב. (שכבת SVG — לא סדרת גרף.)
+  if (pendingPoint && (drawingMode === "trend" || drawingMode === "fib")) {
     const pt = priceAtClick(param);
-    if (pt && isFinite(pt.price) && typeof pt.time === "number") {
-      try {
-        previewSeries.setData([
-          { time: pendingPoint.time, value: pendingPoint.price },
-          { time: pt.time, value: pt.price },
-        ]);
-      } catch (e) {}
-    }
+    if (pt && isFinite(pt.price) && typeof pt.time === "number") drawPreview(pendingPoint, pt);
+    else clearPreview();
+  } else if (drawingMode === "hline") {
+    const pt = priceAtClick(param);
+    if (pt && isFinite(pt.price)) drawPreviewHline(pt.price);
+    else clearPreview();
   }
   const el = $("ohlc-legend");
   let c = null;
@@ -489,7 +531,7 @@ function snapToCandle(price, time) {
   return price;
 }
 
-function priceAtClientXY(clientX, clientY) {
+function priceAtClientXY(clientX, clientY, raw) {
   if (!candleSeries) return null;
   const rect = $("chart").getBoundingClientRect();
   let price;
@@ -497,7 +539,9 @@ function priceAtClientXY(clientX, clientY) {
   catch (e) { return null; }
   if (price === null || price === undefined || isNaN(price)) return null;
   const t = lastCrossParam && lastCrossParam.time;
-  return { time: t, price: snapToCandle(price, t) };
+  // תפריט ההקשר (התראה/קו אופקי) משתמש במחיר המדויק של הסמן — בלי הצמדת מגנט,
+  // כמו ב-TradingView. המגנט נשאר רק לציורים.
+  return { time: t, price: raw ? price : snapToCandle(price, t) };
 }
 
 function closeCtxMenu() {
@@ -520,7 +564,7 @@ function trackCtxPrice() {
     if (e.clientX !== undefined) { cx = e.clientX; cy = e.clientY; }
     else if (e.touches && e.touches.length) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; }
     else return;
-    const pt = priceAtClientXY(cx, cy);
+    const pt = priceAtClientXY(cx, cy, true);
     if (pt && isFinite(pt.price)) {
       ctxPt = pt;
       const pe = document.querySelector("#ctx-menu .ctx-price");
@@ -598,7 +642,7 @@ function wireCtxMenu() {
   // דסקטופ: לחיצה ימנית
   el.addEventListener("contextmenu", ev => {
     ev.preventDefault();
-    const pt = priceAtClientXY(ev.clientX, ev.clientY);
+    const pt = priceAtClientXY(ev.clientX, ev.clientY, true);
     if (pt) showCtxMenu(ev.clientX, ev.clientY, pt);
   });
   // מובייל: לחיצה ארוכה
@@ -609,7 +653,7 @@ function wireCtxMenu() {
     clearTimeout(lpTimer);
     lpTimer = setTimeout(() => {
       if (alertDragActive) return;   // גרירת קו התראה — לא לפתוח תפריט
-      const pt = priceAtClientXY(lpX, lpY);
+      const pt = priceAtClientXY(lpX, lpY, true);
       if (pt) showCtxMenu(lpX, lpY, pt);
     }, 550);
   }, { passive: true });
@@ -641,12 +685,6 @@ function setTool(tool) {
   chart.applyOptions({ handleScroll: tool === "cursor", handleScale: tool === "cursor" });
 }
 
-function clearPreview() {
-  if (previewSeries) {
-    try { chart.removeSeries(previewSeries); } catch (e) {}
-    previewSeries = null;
-  }
-}
 
 function priceAtClick(param) {
   if (!param || !param.point || !candleSeries) return null;
@@ -680,16 +718,8 @@ function onChartClick(param) {
     if (!pendingPoint) {
       pendingPoint = pt;
       $("draw-hint").textContent = "נקודה ראשונה נבחרה — גרור/הזז לנקודת הסיום ולחץ · Esc לביטול";
-      // תצוגה מקדימה: קו מקווקו שעוקב אחרי הסמן עד הלחיצה השנייה
-      clearPreview();
-      try {
-        previewSeries = chart.addLineSeries({
-          color: DRAW_COLORS[drawingMode] || "#3b82f6", lineWidth: 1,
-          lineStyle: LightweightCharts.LineStyle.Dashed,
-          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-        });
-        previewSeries.setData([{ time: pt.time, value: pt.price }]);
-      } catch (e) { previewSeries = null; }
+      // עיגול כחול בנקודה הראשונה (כמו ב-TradingView); הקו המקווקו יעקוב אחרי הסמן
+      drawPreview(pt, null);
     } else {
       addDrawing({ type: drawingMode, points: [pendingPoint, pt] });
       pendingPoint = null;
@@ -1067,14 +1097,16 @@ window.toggleAlertGroup = async gid => {
 };
 
 window.deleteAlertGroup = async gid => {
-  if (!confirm("למחוק את כל התראות הקבוצה?")) return;
-  await authFetch(`/api/alerts/bulk?group_id=${encodeURIComponent(gid)}`, { method: "DELETE" });
+  const arr = serverAlerts.filter(x => x.group_id === gid);
+  const r = await authFetch(`/api/alerts/bulk?group_id=${encodeURIComponent(gid)}`, { method: "DELETE" });
+  showToast(r.ok ? `🗑 נמחקו ${arr.length} התראות` : "שגיאה במחיקה");
   loadAlerts();
 };
 
 window.deleteServerAlert = async id => {
-  if (!confirm("למחוק את ההתראה?")) return;
-  await authFetch(`/api/alerts/${id}`, { method: "DELETE" });
+  const a = serverAlerts.find(x => x.id === id);
+  const r = await authFetch(`/api/alerts/${id}`, { method: "DELETE" });
+  showToast(r.ok ? `🗑 ההתראה ${a ? a.symbol : ""} נמחקה` : "שגיאה במחיקה");
   loadAlerts();
 };
 
@@ -1292,8 +1324,9 @@ function runAICode(code, candles) {
   const factory = new Function(code + "\nreturn compute;");
   const compute = factory();
   if (typeof compute !== "function") throw new Error("compute אינה פונקציה");
-  // עותק עמוק — קוד ה-AI לא יוכל להשחית את נתוני הגרף הראשי
-  const src = (candles && candles.length ? candles : lastCandles).slice(0, 400);
+  // עותק עמוק — קוד ה-AI לא יוכל להשחית את נתוני הגרף הראשי.
+  // שים לב: 400 הנרות האחרונים (העדכניים), לא הראשונים.
+  const src = (candles && candles.length ? candles : lastCandles).slice(-400);
   const sample = src.map(c => Object.assign({}, c));
   const res = compute(sample);
   if (!res || !Array.isArray(res.overlays)) throw new Error("הפונקציה חייבת להחזיר { overlays: [...] }");
