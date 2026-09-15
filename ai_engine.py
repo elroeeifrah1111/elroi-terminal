@@ -1,14 +1,304 @@
-"""AI indicator generator via Hugging Face (free serverless inference).
+"""Deterministic templates for well-known indicators (no LLM call).
 
-Flow: user describes an indicator (Hebrew/English) -> LLM writes JavaScript
-conforming to our chart overlay contract -> validated -> embedded on the chart.
-
-Contract the model must follow:
-    function compute(candles) -> { overlays: [{name, color, width, values:[{time,value}]}] }
-
-Needs env HF_API_TOKEN (free Hugging Face account). Optional HF_MODEL override.
-Free tier = rate limits + occasional cold starts; the client shows progress.
+When the user asks for a standard indicator (RSI, SMA, ...), we return
+hand-written, mathematically correct JavaScript — instant, free, and always
+right. The LLM is only used for genuinely custom requests.
 """
+
+import re
+
+# (key, hebrew name, aliases regex, default params, builder)
+def _num(prompt, default):
+    m = re.search(r"(\d+(?:\.\d+)?)", prompt)
+    try:
+        return float(m.group(1)) if m else default
+    except ValueError:
+        return default
+
+
+def _tpl_rsi(n=14):
+    n = int(n)
+    return f"""// name: RSI {{n}}
+function compute(candles) {{
+  const n = {n}, out = [];
+  let gain = 0, loss = 0;
+  for (let i = 1; i < candles.length; i++) {{
+    const d = candles[i].close - candles[i-1].close;
+    const g = d > 0 ? d : 0, l = d < 0 ? -d : 0;
+    if (i <= n) {{ gain += g; loss += l; }}
+    else {{ gain = (gain * (n - 1) + g) / n; loss = (loss * (n - 1) + l) / n; }}
+    if (i >= n) out.push({{ time: candles[i].time, value: loss === 0 ? 100 : 100 - 100 / (1 + gain / loss) }});
+  }}
+  return {{ overlays: [{{ name: "RSI " + n + " (אוסצילטור)", color: "#7e57c2", width: 1, values: out }}] }};
+}}""".replace("{n}", str(n))
+
+
+def _tpl_sma(n=20):
+    n = int(n)
+    return f"""// name: SMA {n}
+function compute(candles) {{
+  const n = {n}, out = [];
+  let sum = 0;
+  for (let i = 0; i < candles.length; i++) {{
+    sum += candles[i].close;
+    if (i >= n) sum -= candles[i - n].close;
+    if (i >= n - 1) out.push({{ time: candles[i].time, value: sum / n }});
+  }}
+  return {{ overlays: [{{ name: "SMA " + n, color: "#3b82f6", width: 1, values: out }}] }};
+}}"""
+
+
+def _tpl_ema(n=20):
+    n = int(n)
+    return f"""// name: EMA {n}
+function compute(candles) {{
+  const n = {n}, k = 2 / (n + 1), out = [];
+  let prev = null;
+  for (let i = 0; i < candles.length; i++) {{
+    prev = prev === null ? candles[i].close : candles[i].close * k + prev * (1 - k);
+    if (i >= n - 1) out.push({{ time: candles[i].time, value: prev }});
+  }}
+  return {{ overlays: [{{ name: "EMA " + n, color: "#f59e0b", width: 1, values: out }}] }};
+}}"""
+
+
+def _tpl_macd(fast=12, slow=26, sig=9):
+    fast, slow, sig = int(fast), int(slow), int(sig)
+    return f"""// name: MACD {{f}},{{s}},{{g}}
+function compute(candles) {{
+  const cl = candles.map(c => c.close);
+  function ema(vals, n) {{
+    const k = 2 / (n + 1), out = new Array(vals.length).fill(null);
+    let p = null;
+    for (let i = 0; i < vals.length; i++) {{
+      p = p === null ? vals[i] : vals[i] * k + p * (1 - k);
+      if (i >= n - 1) out[i] = p;
+    }}
+    return out;
+  }}
+  const eF = ema(cl, {fast}), eS = ema(cl, {slow});
+  const m = cl.map((_, i) => (eF[i] === null || eS[i] === null) ? null : eF[i] - eS[i]);
+  const sg = ema(m.map(v => v === null ? 0 : v), {sig});
+  const ml = [], sl = [];
+  for (let i = 0; i < candles.length; i++) {{
+    if (m[i] === null) continue;
+    ml.push({{ time: candles[i].time, value: m[i] }});
+    if (sg[i] !== null) sl.push({{ time: candles[i].time, value: sg[i] }});
+  }}
+  return {{ overlays: [
+    {{ name: "MACD (אוסצילטור)", color: "#3b82f6", width: 1, values: ml }},
+    {{ name: "Signal", color: "#f59e0b", width: 1, values: sl }},
+  ] }};
+}}""".replace("{f}", str(fast)).replace("{s}", str(slow)).replace("{g}", str(sig))
+
+
+def _tpl_bb(n=20, k=2):
+    n, k = int(n), float(k)
+    return f"""// name: רצועות בולינגר {{n}}
+function compute(candles) {{
+  const n = {n}, mult = {k}, mid = [], up = [], lo = [];
+  let sum = 0;
+  for (let i = 0; i < candles.length; i++) {{
+    sum += candles[i].close;
+    if (i >= n) sum -= candles[i - n].close;
+    if (i >= n - 1) {{
+      const m = sum / n;
+      let v = 0;
+      for (let j = i - n + 1; j <= i; j++) v += (candles[j].close - m) * (candles[j].close - m);
+      const sd = Math.sqrt(v / n), t = candles[i].time;
+      mid.push({{ time: t, value: m }});
+      up.push({{ time: t, value: m + mult * sd }});
+      lo.push({{ time: t, value: m - mult * sd }});
+    }}
+  }}
+  return {{ overlays: [
+    {{ name: "BB mid", color: "#3b82f6", width: 1, values: mid }},
+    {{ name: "BB upper", color: "#f59e0b", width: 1, values: up }},
+    {{ name: "BB lower", color: "#f59e0b", width: 1, values: lo }},
+  ] }};
+}}""".replace("{n}", str(n))
+
+
+def _tpl_atr(n=14):
+    n = int(n)
+    return f"""// name: ATR {{n}}
+function compute(candles) {{
+  const n = {n}, out = [];
+  let prev = null;
+  for (let i = 0; i < candles.length; i++) {{
+    const c = candles[i];
+    const tr = prev === null ? c.high - c.low :
+      Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));
+    prev = c.close;
+    if (i === n - 1) {{
+      let s = 0;
+      for (let j = 1; j <= n; j++) {{
+        const cj = candles[j], pp = candles[j-1].close;
+        s += Math.max(cj.high - cj.low, Math.abs(cj.high - pp), Math.abs(cj.low - pp));
+      }}
+      out._a = s / n;
+    }} else if (i >= n) {{
+      out._a = (out._a * (n - 1) + tr) / n;
+      out.push({{ time: c.time, value: out._a }});
+    }}
+  }}
+  return {{ overlays: [{{ name: "ATR " + n + " (אוסצילטור)", color: "#22d3ee", width: 1, values: out }}] }};
+}}""".replace("{n}", str(n))
+
+
+def _tpl_stoch(n=14, k=3, d=3):
+    n, k, d = int(n), int(k), int(d)
+    return f"""// name: סטוקסטיק {{n}},{{k}},{{d}}
+function compute(candles) {{
+  const n = {n}, kk = {k}, dd = {d};
+  const raw = [];
+  for (let i = 0; i < candles.length; i++) {{
+    if (i < n - 1) {{ raw.push(null); continue; }}
+    let hi = -Infinity, lo = Infinity;
+    for (let j = i - n + 1; j <= i; j++) {{
+      hi = Math.max(hi, candles[j].high); lo = Math.min(lo, candles[j].low);
+    }}
+    raw.push(hi === lo ? 50 : 100 * (candles[i].close - lo) / (hi - lo));
+  }}
+  function smaArr(v, p) {{
+    const o = new Array(v.length).fill(null);
+    let s = 0;
+    for (let i = 0; i < v.length; i++) {{
+      if (v[i] === null) continue;
+      s += v[i];
+      const from = Math.max(0, i - p + 1);
+      let cnt = 0; for (let j = from; j <= i; j++) if (v[j] !== null) cnt++;
+      if (cnt >= p) {{
+        let ss = 0; for (let j = i - p + 1; j <= i; j++) ss += v[j];
+        o[i] = ss / p;
+      }}
+    }}
+    return o;
+  }}
+  const kL = smaArr(raw, kk), dL = smaArr(kL.map(v => v), dd);
+  const ko = [], ddo = [];
+  for (let i = 0; i < candles.length; i++) {{
+    if (kL[i] !== null) ko.push({{ time: candles[i].time, value: kL[i] }});
+    if (dL[i] !== null) ddo.push({{ time: candles[i].time, value: dL[i] }});
+  }}
+  return {{ overlays: [
+    {{ name: "%K (אוסצילטור)", color: "#3b82f6", width: 1, values: ko }},
+    {{ name: "%D (אוסצילטור)", color: "#f59e0b", width: 1, values: ddo }},
+  ] }};
+}}""".replace("{n}", str(n)).replace("{k}", str(k)).replace("{d}", str(d))
+
+
+def _tpl_vwap():
+    return """// name: VWAP
+function compute(candles) {
+  const out = [];
+  let pv = 0, v = 0, day = null;
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    if (!c.volume) return { overlays: [] };
+    const d = new Date(c.time * 1000).getUTCDate();
+    if (d !== day) { pv = 0; v = 0; day = d; }
+    const tp = (c.high + c.low + c.close) / 3;
+    pv += tp * c.volume; v += c.volume;
+    out.push({ time: c.time, value: pv / v });
+  }
+  return { overlays: [{ name: "VWAP", color: "#b71c1c", width: 1, values: out }] };
+}"""
+
+
+def _tpl_donchian(n=20):
+    n = int(n)
+    return f"""// name: דונצ'יאן {{n}}
+function compute(candles) {{
+  const n = {n}, up = [], lo = [], mid = [];
+  for (let i = 0; i < candles.length; i++) {{
+    if (i < n - 1) continue;
+    let hi = -Infinity, lw = Infinity;
+    for (let j = i - n + 1; j <= i; j++) {{
+      hi = Math.max(hi, candles[j].high); lw = Math.min(lw, candles[j].low);
+    }}
+    const t = candles[i].time;
+    up.push({{ time: t, value: hi }}); lo.push({{ time: t, value: lw }});
+    mid.push({{ time: t, value: (hi + lw) / 2 }});
+  }}
+  return {{ overlays: [
+    {{ name: "Donchian up", color: "#22c55e", width: 1, values: up }},
+    {{ name: "Donchian lo", color: "#ef4444", width: 1, values: lo }},
+    {{ name: "Donchian mid", color: "#787b86", width: 1, values: mid }},
+  ] }};
+}}""".replace("{n}", str(n))
+
+
+def _tpl_supertrend(n=10, mult=3):
+    n, mult = int(n), float(mult)
+    return f"""// name: סופרטרנד {{n}},{{m}}
+function compute(candles) {{
+  const n = {n}, mult = {mult};
+  const tr = [], atr = [];
+  for (let i = 0; i < candles.length; i++) {{
+    const c = candles[i];
+    const t = i === 0 ? c.high - c.low :
+      Math.max(c.high - c.low, Math.abs(c.high - candles[i-1].close), Math.abs(c.low - candles[i-1].close));
+    tr.push(t);
+  }}
+  let s = 0;
+  for (let i = 0; i < tr.length; i++) {{
+    s += tr[i];
+    if (i >= n) s -= tr[i - n];
+    atr.push(i >= n - 1 ? s / n : null);
+  }}
+  const out = [];
+  let dir = 1, st = 0;
+  for (let i = 0; i < candles.length; i++) {{
+    if (atr[i] === null) continue;
+    const c = candles[i], hl2 = (c.high + c.low) / 2;
+    const up = hl2 - mult * atr[i], dn = hl2 + mult * atr[i];
+    if (i > 0 && atr[i-1] !== null) {{
+      if (c.close > st) dir = 1; else if (c.close < st) dir = -1;
+    }}
+    st = dir === 1 ? up : dn;
+    out.push({{ time: c.time, value: st }});
+  }}
+  return {{ overlays: [{{ name: "Supertrend", color: "#a855f7", width: 2, values: out }}] }};
+}}""".replace("{n}", str(n)).replace("{m}", str(mult))
+
+
+# Order matters: first match wins. \b guards against substring false positives.
+KNOWN = [
+    ("rsi", re.compile(r"\brsi\b|אר[\s\-]?אס[\s\-]?איי|relative\s*strength", re.I),
+     lambda p: ("RSI", _tpl_rsi(_num(p, 14)))),
+    ("macd", re.compile(r"\bmacd\b|מקדי", re.I),
+     lambda p: ("MACD", _tpl_macd(12, 26, 9))),
+    ("bollinger", re.compile(r"\bbollinger\b|\bbb\b|בולינגר|רצועות", re.I),
+     lambda p: ("Bollinger", _tpl_bb(20, 2))),
+    ("stochastic", re.compile(r"\bstochastic\b|סטוקסטיק", re.I),
+     lambda p: ("Stochastic", _tpl_stoch(14, 3, 3))),
+    ("supertrend", re.compile(r"\bsupertrend\b|סופר\s*טרנד", re.I),
+     lambda p: ("Supertrend", _tpl_supertrend(10, 3))),
+    ("vwap", re.compile(r"\bvwap\b", re.I),
+     lambda p: ("VWAP", _tpl_vwap())),
+    ("donchian", re.compile(r"\bdonchian\b|דונצ'?יאן", re.I),
+     lambda p: ("Donchian", _tpl_donchian(int(_num(p, 20))))),
+    ("atr", re.compile(r"\batr\b", re.I),
+     lambda p: ("ATR", _tpl_atr(_num(p, 14)))),
+    ("ema", re.compile(r"\bema\b|אקספוננציאלי|exponential", re.I),
+     lambda p: ("EMA", _tpl_ema(_num(p, 20)))),
+    ("sma", re.compile(r"\bsma\b|ממוצע נע|moving average|\bma\b", re.I),
+     lambda p: ("SMA", _tpl_sma(_num(p, 20)))),
+]
+
+
+def match_known(prompt: str):
+    """Returns (name, code) for a standard indicator request, else None."""
+    p = (prompt or "").strip()
+    if not p:
+        return None
+    for _key, rx, build in KNOWN:
+        if rx.search(p):
+            name, code = build(p)
+            return {"name": name, "code": code, "model": "builtin"}
+    return None
+
 
 import logging
 import os
@@ -155,6 +445,12 @@ def generate_indicator(user_prompt: str, timeout: int = 120) -> dict:
         raise ValueError("תיאור ריק")
     if len(user_prompt) > 2000:
         user_prompt = user_prompt[:2000]
+
+    # Fast path: standard indicator -> deterministic, correct, free, instant.
+    known = match_known(user_prompt)
+    if known:
+        logger.info("AI indicator: builtin template for %r", known["name"])
+        return known
 
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     errors = []
