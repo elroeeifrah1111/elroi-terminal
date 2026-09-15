@@ -170,6 +170,14 @@ input { font-family: inherit; }
 }
 #draw-hint.show { display: block; }
 
+#chart-error {
+  position: absolute; top: 40%; right: 50%; transform: translateX(50%);
+  background: rgba(20,26,42,.95); border: 1px solid var(--down);
+  padding: 16px 24px; border-radius: 12px; font-size: 14px; z-index: 30;
+  display: flex; flex-direction: column; gap: 10px; align-items: center;
+}
+#chart-error.hidden { display: none; }
+
 /* ---------- פאנל תחתון ---------- */
 #bottom-panel {
   height: 172px;
@@ -334,8 +342,8 @@ input { font-family: inherit; }
 }
 #toast.hidden { display: none; }
 
-/* ---------- מובייל ---------- */
-@media (max-width: 860px) {
+/* ---------- מובייל (כולל "מצב מחשב" בטלפון — מסך מגע) ---------- */
+@media (max-width: 860px), (pointer: coarse) and (max-width: 1280px) {
   /* שתי שורות: עליונה קבועה (לוגו/סימול/התראה), תחתונה נגללת אופקית (כלים) */
   #topbar {
     flex-wrap: wrap; height: auto; min-height: 46px;
@@ -389,7 +397,7 @@ input { font-family: inherit; }
 #l2-mid { padding: 6px 10px; text-align: center; font-weight: 800; font-size: 13px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--panel2); }
 .l2-foot { padding: 4px 10px; color: var(--muted); font-size: 10px; text-align: center; }
 .tb-btn.active { background: #24304d; color: var(--accent); }
-@media (max-width: 860px) {
+@media (max-width: 860px), (pointer: coarse) and (max-width: 1280px) {
   #l2-panel { width: 172px; font-size: 11px; }
   .l2-row { padding: 2px 6px; }
   #l2-mid { font-size: 12px; padding: 5px 6px; }

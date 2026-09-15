@@ -47,9 +47,9 @@
     <button class="tf-btn" data-range="3M">3M</button>
     <button class="tf-btn" data-range="6M">6M</button>
     <button class="tf-btn" data-range="YTD">YTD</button>
-    <button class="tf-btn active" data-range="1Y">1Y</button>
+    <button class="tf-btn" data-range="1Y">1Y</button>
     <button class="tf-btn" data-range="5Y">5Y</button>
-    <button class="tf-btn" data-range="ALL">הכל</button>
+    <button class="tf-btn active" data-range="ALL">הכל</button>
   </div>
 
   <div class="tb-sep"></div>
@@ -125,6 +125,10 @@
     <div id="ohlc-legend"></div>
     <div id="chart"></div>
     <div id="draw-hint"></div>
+    <div id="chart-error" class="hidden">
+      <div>⚠ טעינת הנתונים נכשלה</div>
+      <button id="chart-retry" class="tb-btn">↻ נסה שוב</button>
+    </div>
 
     <!-- פאנל עומק שוק (Level 2) — קריפטו בלבד -->
     <div id="l2-panel" class="hidden">
@@ -282,6 +286,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=12"></script>
+<script src="/static/app.js?v=13"></script>
 </body>
 </html>
