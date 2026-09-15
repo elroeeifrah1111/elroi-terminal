@@ -92,6 +92,8 @@ const DRAW_NAMES = { trend: "קו מגמה", hline: "קו אופקי", fib: "פ�
 
 /* ---------------- chart init ---------------- */
 function initChart() {
+  if (typeof LightweightCharts === "undefined")
+    throw new Error("chart-lib-missing");
   chart = LightweightCharts.create($("chart"), {
     layout: {
       background: { type: "solid", color: "#0e1220" },
@@ -176,6 +178,7 @@ const TF_MAP = {
 };
 
 async function loadChart() {
+  if (!chart) return; // ספריית הגרפים לא נטענה — הבאנר כבר מוצג
   $("tb-symbol").textContent = currentSymbol;
   $("tb-price").textContent = "טוען...";
   $("tb-chg").textContent = "";
@@ -1181,12 +1184,43 @@ async function pushNow() {
 }
 
 /* ---------------- boot ---------------- */
+// תג שגיאה זעיר לאבחון (מופיע רק אם יש שגיאה לא מטופלת)
+window.addEventListener("error", ev => {
+  try {
+    if ($("js-err-badge")) return;
+    const b = document.createElement("div");
+    b.id = "js-err-badge";
+    b.textContent = "⚠";
+    b.title = "שגיאה: " + (ev.message || "unknown");
+    b.style.cssText = "position:fixed;bottom:6px;left:6px;z-index:9999;background:#7f1d1d;color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:help";
+    document.body.appendChild(b);
+  } catch (e) {}
+});
+
+function showChartLibError() {
+  const area = $("chart-area");
+  if (!area || $("chart-lib-err")) return;
+  const d = document.createElement("div");
+  d.id = "chart-lib-err";
+  d.style.cssText = "position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;background:#0e1220;color:#e5e7eb;z-index:50;text-align:center;padding:20px";
+  d.innerHTML = '<div style="font-size:15px">⚠ ספריית הגרפים לא נטענה (בעיית רשת) — שאר המערכת עובדת</div>' +
+    '<button id="chart-lib-retry" class="tb-btn" style="font-size:14px">🔄 נסה שוב</button>';
+  area.style.position = "relative";
+  area.appendChild(d);
+  $("chart-lib-retry").addEventListener("click", () => location.reload());
+}
+
 function boot() {
   watchlist = loadLocal("charts_watchlist", [...DEFAULT_WL]);
   layouts = loadLocal("charts_layouts", {});
   loadAILibrary();
 
-  initChart();
+  try {
+    initChart();
+  } catch (e) {
+    // הגרף נכשל (למשל CDN חסום) — לא הורגים את כל האפליקציה
+    showChartLibError();
+  }
 
   // סרגל עליון
   document.querySelectorAll(".tf-btn").forEach(b =>
