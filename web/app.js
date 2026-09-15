@@ -1269,14 +1269,55 @@ window.addEventListener("error", ev => {
   } catch (e) {}
 });
 
-function showChartLibError() {
-  // הבאנר מכסה רק את אזור הגרף עצמו — הפאנל התחתון (התראות וכו') נשאר נגיש
+function chartLibPresent() {
+  return typeof LightweightCharts !== "undefined";
+}
+
+// טעינה דינמית של ספריית הגרפים כגיבוי (אם תג ה-script הסטטי נכשל)
+function loadChartLibDynamic() {
+  return new Promise(resolve => {
+    if (chartLibPresent()) { resolve(true); return; }
+    const s = document.createElement("script");
+    s.src = "/static/vendor/lightweight-charts.standalone.production.js?dyn=" + Date.now();
+    s.onload = () => resolve(chartLibPresent());
+    s.onerror = () => resolve(false);
+    const parent = document.head || document.documentElement;
+    if (!parent) { resolve(false); return; }
+    parent.appendChild(s);
+  });
+}
+
+async function initChartWithRecovery() {
+  try {
+    initChart();
+    return;
+  } catch (firstErr) {
+    // הספרייה קיימת אבל האתחול נכשל — מציגים את השגיאה האמיתית
+    if (chartLibPresent()) { showChartLibError(firstErr); return; }
+    // ניסיון שיקום: טעינה דינמית ואז אתחול מחדש
+    const ok = await loadChartLibDynamic();
+    if (ok) {
+      try { initChart(); loadChart(); return; }
+      catch (e2) { showChartLibError(e2); return; }
+    }
+    showChartLibError(firstErr);
+  }
+}
+
+function showChartLibError(err) {
+  // הבאנר מכסה רק את אזור הגרף עצמו — הפאנל התחתון (התראות וכו') נשאר נגיש.
+  // מציג את השגיאה האמיתית כדי לאפשר אבחון (לא מניחים שזו בעיית רשת).
   const chartEl = $("chart");
   if (!chartEl || $("chart-lib-err")) return;
+  const msg = err && err.message ? String(err.message) : "unknown";
+  const diag = "lib:" + (chartLibPresent() ? "yes" : "no") +
+    " | tag:" + (document.querySelector('script[src*="vendor/lightweight-charts"]') ? "yes" : "no");
   const d = document.createElement("div");
   d.id = "chart-lib-err";
-  d.style.cssText = "position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;background:#0e1220;color:#e5e7eb;z-index:50;text-align:center;padding:20px";
-  d.innerHTML = '<div style="font-size:15px">⚠ ספריית הגרפים לא נטענה (בעיית רשת) — שאר המערכת עובדת</div>' +
+  d.style.cssText = "position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;background:#0e1220;color:#e5e7eb;z-index:50;text-align:center;padding:20px";
+  d.innerHTML = '<div style="font-size:15px">⚠ הגרף לא נטען</div>' +
+    '<div dir="ltr" style="font-size:11px;color:#8a93a8;max-width:100%;overflow-wrap:anywhere">' +
+    escapeHtml(msg) + "<br>" + escapeHtml(diag) + "</div>" +
     '<button id="chart-lib-retry" class="tb-btn" style="font-size:14px">🔄 נסה שוב</button>';
   chartEl.style.position = "relative";
   chartEl.appendChild(d);
@@ -1288,12 +1329,8 @@ function boot() {
   layouts = loadLocal("charts_layouts", {});
   loadAILibrary();
 
-  try {
-    initChart();
-  } catch (e) {
-    // הגרף נכשל (למשל CDN חסום) — לא הורגים את כל האפליקציה
-    showChartLibError();
-  }
+  // הגרף: אתחול עם ניסיון שיקום עצמי אם הספרייה לא נטענה
+  initChartWithRecovery();
 
   // סרגל עליון
   document.querySelectorAll(".tf-btn").forEach(b =>
