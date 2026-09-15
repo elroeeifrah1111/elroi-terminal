@@ -43,7 +43,19 @@ RULES:
 - values must be finite numbers. Skip warmup bars (do not pad with nulls).
 - Guard short inputs: if candles.length < 60, return { overlays: [] }.
 - Colors as hex strings, e.g. "#3b82f6".
-- You may implement: SMA, EMA, RSI, MACD, Bollinger, ATR, Stochastic, VWAP (needs volume; if volume missing return empty), Donchian, Keltner, or any custom math the user describes.
+- PREFER WELL-KNOWN INDICATORS. Implement one of these unless the user explicitly
+  describes different math: SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Stochastic,
+  VWAP (needs volume; if volume missing return empty), Donchian, Keltner, Supertrend,
+  Parabolic SAR, Ichimoku. If the request is vague ("something good", "smart lines",
+  "AI prediction"), implement the closest standard indicator and name it accordingly.
+- NO RANDOM-LOOKING OUTPUT. Every overlay must be a smooth, deterministic function
+  of price/volume with clear financial meaning. Never plot raw per-bar differences,
+  unsmoothed oscillators, or invented wavy lines — the result must look like a
+  professional trading indicator, not noise. Smooth with moving averages where needed.
+- SCALE: price overlays must track the price scale (values near the candle prices,
+  e.g. moving averages, bands). Oscillators must be normalized (e.g. 0-100 for RSI /
+  Stochastic) and their name must say they are oscillators.
+- At most 3 overlays per indicator. Each overlay gets a distinct, readable color.
 
 EXAMPLE (SMA 20 + SMA 50):
 // name: ממוצעים נעים
@@ -67,6 +79,32 @@ function compute(candles) {
 RESPONSE FORMAT:
 - First line: // name: <short name in the user's language>
 - Then ONLY the JavaScript code. No explanations, no markdown fences.
+
+EXAMPLE 2 (Bollinger Bands 20, 2):
+// name: רצועות בולינגר
+function compute(candles) {
+  const n = 20, k = 2;
+  const mid = [], up = [], lo = [];
+  let sum = 0;
+  for (let i = 0; i < candles.length; i++) {
+    sum += candles[i].close;
+    if (i >= n) sum -= candles[i - n].close;
+    if (i >= n - 1) {
+      const m = sum / n;
+      let v = 0;
+      for (let j = i - n + 1; j <= i; j++) v += (candles[j].close - m) * (candles[j].close - m);
+      const sd = Math.sqrt(v / n), t = candles[i].time;
+      mid.push({ time: t, value: m });
+      up.push({ time: t, value: m + k * sd });
+      lo.push({ time: t, value: m - k * sd });
+    }
+  }
+  return { overlays: [
+    { name: "BB mid", color: "#3b82f6", width: 1, values: mid },
+    { name: "BB upper", color: "#f59e0b", width: 1, values: up },
+    { name: "BB lower", color: "#f59e0b", width: 1, values: lo },
+  ] };
+}
 """
 
 _DENY = ["fetch(", "XMLHttpRequest", "eval(", "Function(", "import(",
