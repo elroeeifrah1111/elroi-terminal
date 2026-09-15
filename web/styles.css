@@ -101,6 +101,24 @@ input { font-family: inherit; }
 .menu-sep { height: 1px; background: var(--border); margin: 5px 4px; }
 
 #ind-menu.ind-menu { min-width: 230px; max-height: 60vh; overflow-y: auto; }
+
+/* תפריט הקשר של הסמן — צף מעל הגרף */
+#ctx-menu {
+  position: fixed;
+  z-index: 1500;
+  min-width: 210px;
+}
+#ctx-menu .ctx-price {
+  padding: 8px 12px;
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  direction: ltr;
+}
 .ind-item { display: flex !important; align-items: center; gap: 9px; }
 .ind-item.on { background: #24304d; }
 .ind-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
@@ -343,7 +361,6 @@ input { font-family: inherit; }
     z-index: 200;
   }
   #drawbar { width: 42px; }
-  .tf-group .tf-btn[data-tf="1m"], .tf-group .tf-btn[data-tf="30m"] { display: none; }
   #tb-chg { display: none; }
   #bottom-panel { height: 140px; }
   .logo span { display: none; }

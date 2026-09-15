@@ -18,7 +18,7 @@ var currentSource = "";
 
 var drawingMode = "cursor";
 var pendingPoint = null;
-var magnetOn = false;
+var magnetOn = true;
 var drawings = [];          // {id,type,visible,color,points:[{time,price}],text}
 var drawSeq = 1;
 
@@ -172,10 +172,39 @@ function seriesData() {
 }
 
 /* ---------------- data loading ---------------- */
-const TF_MAP = {
-  "1m":  ["1D", "1m"], "5m": ["5D", "5m"], "15m": ["1M", "15m"], "30m": ["3M", "30m"],
-  "1h":  ["6M", "1h"], "1d": ["1Y", "1d"], "1wk": ["5Y", "1wk"], "1mo": ["ALL", "1mo"],
-};
+/* טווח זמן ואינטרוול נרות — כמו ב-TradingView: שני בוררים נפרדים.
+   שילובים לא הגיוניים (נר דקה על 5 שנים) מותאמים אוטומטית. */
+const RANGE_ORDER = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "ALL"];
+const IV_MAX_RANGE = { "1m": "5D", "5m": "3M", "15m": "3M", "30m": "3M", "1h": "1Y" };
+
+function setRange(period) {
+  if (RANGE_ORDER.indexOf(period) === -1) return;
+  const maxR = IV_MAX_RANGE[currentInterval];
+  if (maxR && RANGE_ORDER.indexOf(period) > RANGE_ORDER.indexOf(maxR)) {
+    currentPeriod = maxR;
+    showToast(`טווח הותאם ל־${maxR} לאינטרוול ${currentInterval}`);
+  } else {
+    currentPeriod = period;
+  }
+  document.querySelectorAll("#range-group .tf-btn").forEach(x =>
+    x.classList.toggle("active", x.dataset.range === currentPeriod));
+  loadChart();
+}
+
+function setTfInterval(iv) {
+  currentInterval = iv;
+  document.querySelectorAll("#tf-group .tf-btn").forEach(x =>
+    x.classList.toggle("active", x.dataset.tf === iv));
+  // אם הטווח הנוכחי גדול מדי לאינטרוול החדש — להתאים אוטומטית
+  const maxR = IV_MAX_RANGE[iv];
+  if (maxR && RANGE_ORDER.indexOf(currentPeriod) > RANGE_ORDER.indexOf(maxR)) {
+    currentPeriod = maxR;
+    document.querySelectorAll("#range-group .tf-btn").forEach(x =>
+      x.classList.toggle("active", x.dataset.range === currentPeriod));
+    showToast(`טווח הותאם ל־${maxR} לאינטרוול ${iv}`);
+  }
+  loadChart();
+}
 
 async function loadChart() {
   if (!chart) return; // ספריית הגרפים לא נטענה — הבאנר כבר מוצג
@@ -191,7 +220,11 @@ async function loadChart() {
     const r = await fetch(`/api/candles?symbol=${encodeURIComponent(currentSymbol)}&period=${currentPeriod}&interval=${currentInterval}`);
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || "שגיאה בטעינה");
-    baseCandles = data.candles || [];
+    // סינון הגנתי: נר עם ערך לא תקין מקריס את ספריית הגרפים ("Value is null")
+    baseCandles = (data.candles || []).filter(c => c &&
+      Number.isFinite(+c.time) &&
+      Number.isFinite(+c.open) && Number.isFinite(+c.high) &&
+      Number.isFinite(+c.low) && Number.isFinite(+c.close));
     lastCandles = baseCandles;
     currentSource = data.source || "";
     buildMainSeries();
@@ -200,6 +233,7 @@ async function loadChart() {
     if (window.applyIndicators) applyIndicators();
     renderDrawings();
     renderAIOverlays();
+    renderAlertLines();
 
     const px = data.current_price;
     livePrice = px;
@@ -232,13 +266,7 @@ function updateBadge() {
   else b.textContent = "📊 " + (currentSource || "—");
 }
 
-function setTimeframe(tf) {
-  const m = TF_MAP[tf];
-  if (!m) return;
-  currentPeriod = m[0]; currentInterval = m[1];
-  document.querySelectorAll(".tf-btn").forEach(x => x.classList.toggle("active", x.dataset.tf === tf));
-  loadChart();
-}
+function setTimeframe(tf) { setTfInterval(tf); } // תאימות לאחור
 
 /* ---------------- live crypto stream ---------------- */
 function isCrypto(sym) {
@@ -268,10 +296,17 @@ function startLiveIfCrypto() {
       // עדכון הנר האחרון
       if ((chartType === "candles" || chartType === "heikin" || chartType === "bars") && lastCandles.length) {
         const last = lastCandles[lastCandles.length - 1];
+        const upd = {
+          time: last.time, open: last.open,
+          high: Math.max(last.high, m.price), low: Math.min(last.low, m.price),
+          close: m.price,
+        };
+        // לא שולחים לספרייה עדכון עם ערך לא תקין — זה מה שקרס ("Value is null")
+        if (![upd.time, upd.open, upd.high, upd.low, upd.close].every(v => typeof v === "number" && isFinite(v))) return;
         last.close = m.price;
-        last.high = Math.max(last.high, m.price);
-        last.low = Math.min(last.low, m.price);
-        candleSeries.update(chartType === "heikin" ? heikinAshi(baseCandles).slice(-1)[0] : last);
+        last.high = upd.high;
+        last.low = upd.low;
+        candleSeries.update(chartType === "heikin" ? heikinAshi(baseCandles).slice(-1)[0] : upd);
       } else if (lastCandles.length) {
         candleSeries.update({ time: lastCandles[lastCandles.length - 1].time, value: m.price });
       }
@@ -287,6 +322,7 @@ function stopLive() {
 
 /* ---------------- crosshair / OHLC legend ---------------- */
 function onCrosshairMove(param) {
+  lastCrossParam = param || null;
   const el = $("ohlc-legend");
   let c = null;
   if (param && param.time) c = lastCandles.find(x => x.time === param.time);
@@ -299,6 +335,233 @@ function onCrosshairMove(param) {
     `<span>L <b>${fmtPrice(c.low)}</b></span>` +
     `<span>C <b style="color:${col}">${fmtPrice(c.close)}</b></span>` +
     (c.volume ? `<span>Vol <b>${Number(c.volume).toLocaleString("en-US", { maximumFractionDigits: 0 })}</b></span>` : "");
+}
+
+/* ---------------- גרירת קווי התראה על הגרף ---------------- */
+var alertLines = [];   // {alertId, line, side}
+var alertDragActive = false;
+
+function alertDragPrice(alert) {
+  // מחזיר את המחיר הקבוע של ההתראה (אם יש) — רק אותו אפשר לגרור
+  const c = alert && alert.condition;
+  if (!c || c.type !== "rule") return null;
+  if (c.left && c.left.kind === "value" && isFinite(+c.left.value))
+    return { price: +c.left.value, side: "left" };
+  if (c.right && c.right.kind === "value" && isFinite(+c.right.value))
+    return { price: +c.right.value, side: "right" };
+  return null;
+}
+
+function renderAlertLines() {
+  try {
+    alertLines.forEach(o => { try { candleSeries.removePriceLine(o.line); } catch (e) {} });
+  } catch (e) {}
+  alertLines = [];
+  if (!candleSeries || typeof candleSeries.createPriceLine !== "function") return;
+  (serverAlerts || []).forEach(a => {
+    if (!a.active || a.symbol !== currentSymbol) return;
+    const dp = alertDragPrice(a);
+    if (!dp) return;
+    const line = candleSeries.createPriceLine({
+      price: dp.price,
+      color: "#f59e0b",
+      lineWidth: 2,
+      lineStyle: 2, // dashed
+      axisLabelVisible: true,
+      title: "⏰ " + (a.name || "").slice(0, 24),
+    });
+    alertLines.push({ alertId: a.id, line, side: dp.side });
+  });
+}
+
+function alertLineAt(yPx) {
+  // מוצא קו התראה קרוב לנקודת המגע (עד ~12px)
+  for (const o of alertLines) {
+    try {
+      const y = candleSeries.priceToCoordinate(o.line.options().price);
+      if (y != null && Math.abs(y - yPx) <= 12) return o;
+    } catch (e) {}
+  }
+  return null;
+}
+
+function wireAlertDrag() {
+  const el = $("chart");
+  if (!el || el._alertDragWired) return;
+  el._alertDragWired = true;
+  let cand = null, dragging = false, sx = 0, sy = 0, lastPrice = null;
+
+  const pos = e => {
+    const r = el.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+
+  el.addEventListener("pointerdown", e => {
+    if (drawingMode !== "cursor" || e.button === 2) return;
+    const p = pos(e);
+    const hit = alertLineAt(p.y);
+    if (!hit) return;
+    cand = hit; dragging = false; sx = p.x; sy = p.y; lastPrice = null;
+    // נטרול גלילה/זום מיד — כדי שגרירה לא תזיז את הגרף (במיוחד במובייל)
+    chart.applyOptions({ handleScroll: false, handleScale: false });
+  });
+
+  el.addEventListener("pointermove", e => {
+    if (!cand) return;
+    const p = pos(e);
+    if (!dragging && Math.hypot(p.x - sx, p.y - sy) > 5) {
+      dragging = true;
+      alertDragActive = true;   // מבטל long-press של תפריט ההקשר
+    }
+    if (dragging) {
+      try {
+        const pr = candleSeries.coordinateToPrice(p.y);
+        if (pr != null && isFinite(pr)) {
+          lastPrice = pr;
+          cand.line.applyOptions({ price: pr });
+        }
+      } catch (err) {}
+    }
+  });
+
+  const end = async e => {
+    if (!cand) return;
+    const wasDragging = dragging, o = cand, px = lastPrice;
+    cand = null; dragging = false;
+    alertDragActive = false;
+    chart.applyOptions({ handleScroll: true, handleScale: true });
+    if (wasDragging) {
+      if (px != null) {
+        const alert = (serverAlerts || []).find(a => a.id === o.alertId);
+        if (alert) {
+          const cond = JSON.parse(JSON.stringify(alert.condition));
+          const tgt = o.side === "left" ? cond.left : cond.right;
+          if (tgt) tgt.value = Math.round(px * 100) / 100;
+          try {
+            const r = await authFetch(`/api/alerts/${o.alertId}`, {
+              method: "PUT", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ condition: cond }),
+            });
+            if (r.ok) showToast("⏰ ההתראה עודכנה ל־" + fmtPrice(px));
+            else showToast("שגיאה בעדכון ההתראה");
+          } catch (err) { showToast("שגיאה בעדכון ההתראה"); }
+          loadAlerts();
+        }
+      }
+    }
+  };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", () => {
+    if (cand) { cand = null; dragging = false; alertDragActive = false;
+      chart.applyOptions({ handleScroll: true, handleScale: true }); }
+  });
+}
+
+/* ---------------- תפריט הקשר של הסמן (הפלוס) ---------------- */
+let lastCrossParam = null;
+let ctxOpenedAt = 0;
+
+function snapToCandle(price, time) {
+  if (magnetOn && time) {
+    const c = lastCandles.find(x => x.time === time);
+    if (c) {
+      const cands = [c.open, c.high, c.low, c.close];
+      price = cands.reduce((a, b) => Math.abs(b - price) < Math.abs(a - price) ? b : a);
+    }
+  }
+  return price;
+}
+
+function priceAtClientXY(clientX, clientY) {
+  if (!candleSeries) return null;
+  const rect = $("chart").getBoundingClientRect();
+  let price;
+  try { price = candleSeries.coordinateToPrice(clientY - rect.top); }
+  catch (e) { return null; }
+  if (price === null || price === undefined || isNaN(price)) return null;
+  const t = lastCrossParam && lastCrossParam.time;
+  return { time: t, price: snapToCandle(price, t) };
+}
+
+function closeCtxMenu() { const m = $("ctx-menu"); if (m) m.classList.remove("open"); }
+
+function showCtxMenu(clientX, clientY, pt) {
+  const m = $("ctx-menu");
+  if (!m) return;
+  m.innerHTML =
+    `<div class="ctx-price">${fmtPrice(pt.price)}</div>` +
+    `<button id="ctx-alert">⏰ התראה במחיר זה</button>` +
+    `<button id="ctx-hline">📏 קו אופקי כאן</button>`;
+  m.classList.add("open");
+  // מיקום ליד הסמן — תמיד בתוך המסך
+  const mw = 230, mh = 160;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let left = Math.max(8, Math.min(clientX - 24, vw - mw - 8));
+  let top = clientY + 10;
+  if (top + mh > vh - 8) top = Math.max(8, clientY - mh - 10);
+  m.style.left = left + "px";
+  m.style.right = "auto";
+  m.style.top = top + "px";
+  ctxOpenedAt = Date.now();
+  $("ctx-alert").addEventListener("click", () => { closeCtxMenu(); openAlertAtPrice(pt.price); });
+  $("ctx-hline").addEventListener("click", () => {
+    closeCtxMenu();
+    if (pt.time) {
+      addDrawing({ type: "hline", points: [{ time: pt.time, price: pt.price }] });
+      setTool("cursor");
+      showToast("קו אופקי נוסף 📏");
+    } else showToast("לא נמצא נר בנקודה");
+  });
+}
+
+async function openAlertAtPrice(price) {
+  await openAlertBuilder();
+  try {
+    $("ab-ctype").value = "rule";
+    $("ab-left-kind").value = "price";
+    $("ab-right-kind").value = "value";
+    syncBuilderKinds();
+    const rv = $("ab-right-value");
+    if (rv) rv.value = String(Number(price.toPrecision(6)));
+    const opSel = $("ab-op");
+    if (opSel && opSel.options.length) {
+      const opts = Array.from(opSel.options);
+      const cross = opts.find(o => /cross/i.test(o.value));
+      opSel.value = (cross || opts[0]).value;
+    }
+    $("ab-name").value = `${currentSymbol} @ ${fmtPrice(price)}`;
+  } catch (e) { /* טופס נשאר בריק — המשתמש ימלא */ }
+}
+
+function wireCtxMenu() {
+  const el = $("chart");
+  if (!el || el._ctxWired) return;
+  el._ctxWired = true;
+  // דסקטופ: לחיצה ימנית
+  el.addEventListener("contextmenu", ev => {
+    ev.preventDefault();
+    const pt = priceAtClientXY(ev.clientX, ev.clientY);
+    if (pt) showCtxMenu(ev.clientX, ev.clientY, pt);
+  });
+  // מובייל: לחיצה ארוכה
+  let lpTimer = null, lpX = 0, lpY = 0;
+  el.addEventListener("touchstart", ev => {
+    if (ev.touches.length !== 1) return;
+    const t = ev.touches[0]; lpX = t.clientX; lpY = t.clientY;
+    clearTimeout(lpTimer);
+    lpTimer = setTimeout(() => {
+      if (alertDragActive) return;   // גרירת קו התראה — לא לפתוח תפריט
+      const pt = priceAtClientXY(lpX, lpY);
+      if (pt) showCtxMenu(lpX, lpY, pt);
+    }, 550);
+  }, { passive: true });
+  el.addEventListener("touchmove", ev => {
+    if (!ev.touches.length) return;
+    const t = ev.touches[0];
+    if (Math.hypot(t.clientX - lpX, t.clientY - lpY) > 12) clearTimeout(lpTimer);
+  }, { passive: true });
+  el.addEventListener("touchend", () => clearTimeout(lpTimer));
+  el.addEventListener("touchcancel", () => clearTimeout(lpTimer));
 }
 
 /* ---------------- drawings ---------------- */
@@ -664,7 +927,23 @@ async function renderServerAlerts() {
   if (!serverAlerts.length) {
     html = `<div class="obj-empty">אין התראות — לחץ ⏰ התראה בסרגל העליון לבניית חוק</div>`;
   } else {
-    html = serverAlerts.map(a => `
+    const singles = serverAlerts.filter(a => !a.group_id);
+    const groups = {};
+    serverAlerts.filter(a => a.group_id).forEach(a => {
+      (groups[a.group_id] = groups[a.group_id] || []).push(a);
+    });
+    html = Object.entries(groups).map(([gid, arr]) => {
+      const act = arr.filter(a => a.active).length;
+      const gname = arr[0].group_name || "רשימת מעקב";
+      return `
+      <div class="obj-row">
+        <span class="sw" style="background:${act ? "var(--warn)" : "var(--muted)"}"></span>
+        <span class="nm">📋 <b>${escapeHtml(gname)}</b> · ${arr.length} סמלים (${act} פעילות)
+          <br><span style="color:var(--muted);font-size:11.5px">${escapeHtml(describeCondClient(arr[0].condition))}</span></span>
+        <button class="mini" onclick="toggleAlertGroup('${gid}')" title="הפעל/השהה את כל הקבוצה">${act ? "⏸" : "▶"}</button>
+        <button class="mini del" onclick="deleteAlertGroup('${gid}')" title="מחק את כל הקבוצה">✕</button>
+      </div>`;
+    }).join("") + singles.map(a => `
       <div class="obj-row">
         <span class="sw" style="background:${a.active ? "var(--warn)" : "var(--muted)"}"></span>
         <span class="nm"><b>${escapeHtml(a.symbol)}</b> · ${escapeHtml(a.name)}
@@ -686,6 +965,7 @@ async function renderServerAlerts() {
     }
   } catch (e) {}
   el.innerHTML = html;
+  renderAlertLines();
 }
 
 window.toggleServerAlert = async id => {
@@ -695,6 +975,23 @@ window.toggleServerAlert = async id => {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ active: !a.active }),
   });
+  loadAlerts();
+};
+
+window.toggleAlertGroup = async gid => {
+  const arr = serverAlerts.filter(x => x.group_id === gid);
+  if (!arr.length) return;
+  const toActive = arr.some(a => !a.active);
+  await authFetch("/api/alerts/bulk", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group_id: gid, alert: { active: toActive } }),
+  });
+  loadAlerts();
+};
+
+window.deleteAlertGroup = async gid => {
+  if (!confirm("למחוק את כל התראות הקבוצה?")) return;
+  await authFetch(`/api/alerts/bulk?group_id=${encodeURIComponent(gid)}`, { method: "DELETE" });
   loadAlerts();
 };
 
@@ -737,6 +1034,8 @@ async function openAlertBuilder() {
   $("ab-symbol").textContent = currentSymbol;
   $("ab-name").value = "";
   $("ab-error").textContent = "";
+  if ($("ab-watchlist")) $("ab-watchlist").checked = false;
+  if ($("ab-interval")) $("ab-interval").value = "5";
   $("alert-modal").classList.remove("hidden");
 }
 function closeAlertBuilder() { $("alert-modal").classList.add("hidden"); }
@@ -776,19 +1075,38 @@ async function submitAlert() {
     name: $("ab-name").value.trim(),
     condition,
     frequency: $("ab-freq").value,
+    interval_min: parseInt($("ab-interval").value, 10) || 5,
     expires_at,
   };
+  const useWatchlist = $("ab-watchlist") && $("ab-watchlist").checked && watchlist.length > 0;
   try {
-    const r = await authFetch("/api/alerts", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const d = await r.json();
-    if (r.status === 401) { authNeededToast(); return; }
-    if (!r.ok) throw new Error(d.error || "שגיאה");
-    closeAlertBuilder();
-    loadAlerts();
-    showToast("⏰ ההתראה נוצרה — תיבדק כל 5 דקות" + (d.name ? ": " + d.name : ""));
+    let r, d;
+    if (useWatchlist) {
+      r = await authFetch("/api/alerts/bulk", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbols: watchlist,
+          alert: { ...payload, group_name: "רשימת מעקב · " + payload.name },
+        }),
+      });
+      d = await r.json();
+      if (r.status === 401) { authNeededToast(); return; }
+      if (!r.ok) throw new Error(d.error || "שגיאה");
+      closeAlertBuilder();
+      loadAlerts();
+      showToast(`📋 נוצרו ${d.created} התראות לרשימה` + (d.skipped && d.skipped.length ? ` (${d.skipped.length} כפילויות דולגו)` : ""));
+    } else {
+      r = await authFetch("/api/alerts", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      d = await r.json();
+      if (r.status === 401) { authNeededToast(); return; }
+      if (!r.ok) throw new Error(d.error || "שגיאה");
+      closeAlertBuilder();
+      loadAlerts();
+      showToast("⏰ ההתראה נוצרה" + (d.name ? ": " + d.name : ""));
+    }
   } catch (e) {
     errEl.textContent = e.message;
   }
@@ -813,8 +1131,10 @@ function applyLayout(name) {
   currentPeriod = L.period || "1Y";
   currentInterval = L.interval || "1d";
   chartType = L.chartType || "candles";
-  const tfBtn = Object.keys(TF_MAP).find(k => TF_MAP[k][0] === currentPeriod && TF_MAP[k][1] === currentInterval);
-  document.querySelectorAll(".tf-btn").forEach(x => x.classList.toggle("active", x.dataset.tf === (tfBtn || "1d")));
+  document.querySelectorAll("#tf-group .tf-btn").forEach(x =>
+    x.classList.toggle("active", x.dataset.tf === (currentInterval || "1d")));
+  document.querySelectorAll("#range-group .tf-btn").forEach(x =>
+    x.classList.toggle("active", x.dataset.range === (currentPeriod || "1Y")));
   if (L.watchlist) { watchlist = L.watchlist; saveLocal("charts_watchlist", watchlist); }
   try {
     const o = {};
@@ -1371,10 +1691,14 @@ function boot() {
 
   // הגרף: אתחול עם ניסיון שיקום עצמי אם הספרייה לא נטענה
   initChartWithRecovery();
+  wireCtxMenu();
+  wireAlertDrag();
 
-  // סרגל עליון
-  document.querySelectorAll(".tf-btn").forEach(b =>
-    b.addEventListener("click", () => setTimeframe(b.dataset.tf)));
+  // סרגל עליון — אינטרוול נרות וטווח זמן נפרדים
+  document.querySelectorAll("#tf-group .tf-btn").forEach(b =>
+    b.addEventListener("click", () => setTfInterval(b.dataset.tf)));
+  document.querySelectorAll("#range-group .tf-btn").forEach(b =>
+    b.addEventListener("click", () => setRange(b.dataset.range)));
 
   wireMenu("ctype-btn", "ctype-menu");
   $("ctype-menu").querySelectorAll("[data-ct]").forEach(b =>
@@ -1504,7 +1828,8 @@ function boot() {
     else if (k === "x") setTool("text");
   });
   document.addEventListener("click", ev => {
-    if (!ev.target.closest(".dropdown")) closeAllMenus();
+    if (Date.now() - ctxOpenedAt < 500) return; // קליק שחרור אחרי לחיצה ארוכה
+    if (!ev.target.closest(".dropdown") && !ev.target.closest("#ctx-menu")) { closeAllMenus(); closeCtxMenu(); }
   });
 
   // כפתור מעקב במובייל
