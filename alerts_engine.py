@@ -17,14 +17,21 @@ same caveat as the rest of the free tier).
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional
+
+import supa
 
 logger = logging.getLogger("charts.alerts")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STORE_PATH = os.path.join(BASE_DIR, "alerts.json")
+
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 # ----------------------------------------------------------------------------
 # Pure-python indicators (aligned to candle list; None where undefined)
@@ -285,31 +292,147 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# ---- trigger log (per user, in memory; local mode also persists to file) ----
+_TRIGGER_LOGS: Dict[str, List[dict]] = {}
+
+
+def log_trigger(user_id: str, trig: dict) -> None:
+    log = _TRIGGER_LOGS.setdefault(user_id, [])
+    log.append(trig)
+    del log[:-200]
+
+
+def recent_triggers(user_id: str, limit: int = 200) -> List[dict]:
+    return _TRIGGER_LOGS.get(user_id, [])[-limit:]
+
+
+def seed_triggers(user_id: str, trigs: List[dict]) -> None:
+    _TRIGGER_LOGS[user_id] = list(trigs or [])[-200:]
+
+
+# ----------------------------------------------------------------------------
+# Storage backends: JSON file (local mode) vs Supabase (cloud mode)
+# ----------------------------------------------------------------------------
+
+class JsonAlertStorage:
+    """alerts.json next to this file (ephemeral on Render free)."""
+
+    def __init__(self, path: str = STORE_PATH):
+        self.path = path
+
+    def load(self) -> dict:
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                data = json.load(f)
+            return {"alerts": data.get("alerts", []),
+                    "triggers": data.get("triggers", [])[-200:]}
+        except (FileNotFoundError, ValueError):
+            return {"alerts": [], "triggers": []}
+
+    def save(self, user_id: str, alerts: List[dict],
+             triggers: List[dict]) -> List[dict]:
+        try:
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"alerts": alerts, "triggers": triggers[-200:]},
+                          f, ensure_ascii=False)
+            os.replace(tmp, self.path)
+        except Exception as exc:
+            logger.warning("alert store save failed: %s", exc)
+        return alerts
+
+
+def _market_of(symbol: str) -> str:
+    try:
+        from markets import detect_market
+        return detect_market(symbol or "")
+    except Exception:
+        return ""
+
+
+def _row_to_alert(row: dict) -> dict:
+    return {
+        "id": row.get("id"),
+        "user_id": row.get("user_id"),
+        "symbol": row.get("symbol") or "",
+        "name": row.get("name") or "",
+        "condition": row.get("rule") or {},
+        "frequency": row.get("frequency") or "once",
+        "expires_at": row.get("expires_at"),
+        "active": bool(row.get("active", True)),
+        "created_at": row.get("created_at"),
+        "last_trigger": row.get("last_triggered_at"),
+        "last_bar": row.get("last_bar"),
+        "trigger_count": row.get("trigger_count") or 0,
+    }
+
+
+def _alert_to_row(alert: dict, user_id: str) -> dict:
+    row = {
+        "user_id": user_id,
+        "name": str(alert.get("name") or "")[:200],
+        "symbol": str(alert.get("symbol") or "")[:40],
+        "market": _market_of(alert.get("symbol") or ""),
+        "rule": alert.get("condition") or {},
+        "frequency": alert.get("frequency") or "once",
+        "expires_at": alert.get("expires_at"),
+        "active": bool(alert.get("active", True)),
+        "last_triggered_at": alert.get("last_trigger"),
+        "last_bar": alert.get("last_bar"),
+        "trigger_count": int(alert.get("trigger_count") or 0),
+    }
+    aid = alert.get("id")
+    if aid and _UUID_RE.match(str(aid)):
+        row["id"] = str(aid)
+    # created_at is DB-managed on insert
+    return row
+
+
+class SupabaseAlertStorage:
+    """Alerts table in Supabase (persistent across deploys/restarts)."""
+
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+
+    def load(self) -> dict:
+        rows = supa.select("alerts", {"user_id": self.user_id},
+                           order="created_at.desc", limit=500)
+        return {"alerts": [_row_to_alert(r) for r in rows], "triggers": []}
+
+    def save(self, user_id: str, alerts: List[dict],
+             triggers: List[dict]) -> List[dict]:
+        # Replace-all is simple and safe for a single user's alert list.
+        supa.delete_rows("alerts", {"user_id": user_id})
+        rows = [_alert_to_row(a, user_id) for a in alerts]
+        if rows:
+            inserted = supa.insert_rows("alerts", rows)
+            if inserted:
+                return [_row_to_alert(r) for r in inserted]
+            logger.warning("supabase alert save returned nothing; "
+                           "keeping in-memory copy")
+        return alerts
+
+
 class AlertStore:
-    def __init__(self):
+    def __init__(self, user_id: str = "local", storage=None):
+        self.user_id = user_id
+        self.storage = storage or JsonAlertStorage()
         self.alerts: List[dict] = []
-        self.triggers: List[dict] = []
         self.load()
 
     # ---- persistence ----
     def load(self):
-        try:
-            with open(STORE_PATH, encoding="utf-8") as f:
-                data = json.load(f)
-            self.alerts = data.get("alerts", [])
-            self.triggers = data.get("triggers", [])[-200:]
-        except (FileNotFoundError, ValueError):
-            self.alerts, self.triggers = [], []
+        data = self.storage.load() or {}
+        self.alerts = data.get("alerts", [])
+        seed_triggers(self.user_id, data.get("triggers", []))
 
+    def _persist(self):
+        self.alerts = (self.storage.save(
+            self.user_id, self.alerts, recent_triggers(self.user_id)) or [])
+
+    # Backwards-compatible alias (local mode used store.save()).
     def save(self):
-        try:
-            tmp = STORE_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"alerts": self.alerts, "triggers": self.triggers[-200:]},
-                          f, ensure_ascii=False)
-            os.replace(tmp, STORE_PATH)
-        except Exception as exc:
-            logger.warning("alert store save failed: %s", exc)
+        self._persist()
 
     # ---- CRUD ----
     def validate_condition(self, cond: dict) -> Optional[str]:
@@ -363,8 +486,8 @@ class AlertStore:
         if not alert["symbol"]:
             raise ValueError("חסר סימול")
         self.alerts.append(alert)
-        self.save()
-        return alert
+        self._persist()
+        return self.alerts[-1] if self.alerts else alert
 
     def update(self, aid: str, data: dict) -> Optional[dict]:
         a = self.get(aid)
@@ -385,14 +508,14 @@ class AlertStore:
             a["frequency"] = data["frequency"]
         if "expires_at" in data:
             a["expires_at"] = data["expires_at"]
-        self.save()
+        self._persist()
         return a
 
     def delete(self, aid: str) -> bool:
         n = len(self.alerts)
         self.alerts = [a for a in self.alerts if a["id"] != aid]
         if len(self.alerts) != n:
-            self.save()
+            self._persist()
             return True
         return False
 
@@ -455,8 +578,7 @@ class AlertStore:
                 "condition": describe_condition(a["condition"]),
                 "price": price, "time": a["last_trigger"],
             }
-            self.triggers.append(trig)
-            self.triggers = self.triggers[-200:]
+            log_trigger(self.user_id, trig)
             text = (f"🔔 התראה: {a['name']}\n"
                     f"{a['symbol']} — {describe_condition(a['condition'])}\n"
                     f"מחיר: {price}")
@@ -466,7 +588,7 @@ class AlertStore:
             changed = True
             logger.info("alert fired: %s %s @ %s (tg=%s)", a["id"], a["symbol"], price, sent)
         if changed:
-            self.save()
+            self._persist()
         return fired
 
     @staticmethod

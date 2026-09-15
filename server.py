@@ -6,6 +6,10 @@ Free-tier design:
 - Forex daily: Frankfurter (ECB); intraday FX via yfinance.
 - Stocks: yfinance (+ Nasdaq/Stooq/Nasdaq fallbacks could be added later).
 - No database in v1: layouts/drawings persist in the browser (localStorage).
+- Optional Supabase (free tier): when SUPABASE_URL + SUPABASE_SERVICE_KEY are
+  set, alerts/drawings/layouts/watchlists/AI indicators sync per user and the
+  alert engine evaluates every user's alerts. Without it, everything keeps
+  working locally exactly as before.
 """
 
 import asyncio
@@ -18,10 +22,11 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 import requests
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
+import supa
 from markets import (
     detect_market,
     fetch_crypto_candles,
@@ -31,13 +36,41 @@ from markets import (
     market_lists,
     normalize_symbol,
 )
-from alerts_engine import AlertStore
+from alerts_engine import AlertStore, SupabaseAlertStorage, recent_triggers
 import ai_engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("charts")
 
+# Local-mode store (alerts.json). When Supabase is configured, one store
+# per user is created on demand (see store_for).
 alert_store = AlertStore()
+
+
+def get_user_id(request: Request) -> str:
+    """Resolve the caller's user id.
+
+    - Supabase not configured -> "local" (current behaviour, no login needed).
+    - Configured -> the Bearer token is verified against Supabase Auth;
+      missing/invalid token -> 401.
+    """
+    if not supa.is_configured():
+        return "local"
+    auth = request.headers.get("authorization", "")
+    token = ""
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+    uid = supa.auth_user_id(token) if token else None
+    if not uid:
+        raise HTTPException(status_code=401, detail="נדרשת התחברות")
+    return uid
+
+
+def store_for(user_id: str) -> AlertStore:
+    if user_id == "local":
+        return alert_store
+    return AlertStore(user_id=user_id,
+                      storage=SupabaseAlertStorage(user_id))
 
 
 async def _alert_loop():
@@ -45,9 +78,19 @@ async def _alert_loop():
     await asyncio.sleep(60)  # let the server settle first
     while True:
         try:
-            fired = alert_store.evaluate_all(load_candles)
-            if fired:
-                logger.info("alert loop fired %d", len(fired))
+            if supa.is_configured():
+                # Cheap heartbeat: keeps the free Supabase project from
+                # pausing after ~7 days of inactivity, even with no alerts.
+                supa.heartbeat()
+                for uid in supa.alert_user_ids():
+                    try:
+                        store_for(uid).evaluate_all(load_candles)
+                    except Exception as exc:
+                        logger.warning("alert loop user %s error: %s", uid, exc)
+            else:
+                fired = alert_store.evaluate_all(load_candles)
+                if fired:
+                    logger.info("alert loop fired %d", len(fired))
         except Exception as exc:
             logger.warning("alert loop error: %s", exc)
         await asyncio.sleep(300)
@@ -274,6 +317,52 @@ def api_search(q: str):
 
 
 # ----------------------------------------------------------------------------
+# Public config (safe to expose: anon key is meant for the browser)
+# ----------------------------------------------------------------------------
+@app.get("/api/config")
+def api_config():
+    return {
+        "supabase_url": supa.supabase_url() if supa.is_configured() else "",
+        "supabase_anon_key": supa.anon_key() if supa.is_configured() else "",
+    }
+
+
+# ----------------------------------------------------------------------------
+# Cloud sync (Supabase): drawings, layouts, watchlists, AI indicators
+# ----------------------------------------------------------------------------
+@app.get("/api/sync/pull")
+def api_sync_pull(request: Request):
+    uid = get_user_id(request)
+    if uid == "local":
+        return {"drawings": [], "layouts": [], "watchlists": [],
+                "indicators": [], "alerts": []}
+    return {
+        "drawings": supa.select("drawings", {"user_id": uid},
+                                order="updated_at.desc", limit=500),
+        "layouts": supa.select("chart_layouts", {"user_id": uid},
+                               order="updated_at.desc", limit=100),
+        "watchlists": supa.select("watchlists", {"user_id": uid},
+                                  order="updated_at.desc", limit=20),
+        "indicators": supa.select("custom_indicators", {"user_id": uid},
+                                  order="updated_at.desc", limit=200),
+        "alerts": store_for(uid).list(),
+    }
+
+
+@app.post("/api/sync/push")
+def api_sync_push(request: Request, payload: dict):
+    uid = get_user_id(request)
+    if uid == "local":
+        return {"ok": True, "synced": False}
+    body = payload or {}
+    supa.sync_drawings(uid, body.get("drawings"))
+    supa.sync_layouts(uid, body.get("layouts"))
+    supa.sync_watchlists(uid, body.get("watchlists"))
+    supa.sync_indicators(uid, body.get("indicators"))
+    return {"ok": True, "synced": True}
+
+
+# ----------------------------------------------------------------------------
 # Rule-based alerts API
 # ----------------------------------------------------------------------------
 @app.get("/api/alerts/meta")
@@ -282,22 +371,23 @@ def api_alerts_meta():
 
 
 @app.get("/api/alerts")
-def api_alerts_list():
-    return {"alerts": alert_store.list()}
+def api_alerts_list(request: Request):
+    return {"alerts": store_for(get_user_id(request)).list()}
 
 
 @app.post("/api/alerts")
-def api_alerts_create(payload: dict):
+def api_alerts_create(request: Request, payload: dict):
     try:
-        return alert_store.create(payload or {})
+        return store_for(get_user_id(request)).create(payload or {})
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
 
 
+@app.patch("/api/alerts/{aid}")
 @app.put("/api/alerts/{aid}")
-def api_alerts_update(aid: str, payload: dict):
+def api_alerts_update(aid: str, request: Request, payload: dict):
     try:
-        a = alert_store.update(aid, payload or {})
+        a = store_for(get_user_id(request)).update(aid, payload or {})
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
     if not a:
@@ -306,20 +396,21 @@ def api_alerts_update(aid: str, payload: dict):
 
 
 @app.delete("/api/alerts/{aid}")
-def api_alerts_delete(aid: str):
-    if alert_store.delete(aid):
+def api_alerts_delete(aid: str, request: Request):
+    if store_for(get_user_id(request)).delete(aid):
         return {"ok": True}
     return JSONResponse(status_code=404, content={"error": "לא נמצא"})
 
 
 @app.get("/api/alerts/triggers")
-def api_alerts_triggers():
-    return {"triggers": list(reversed(alert_store.triggers))}
+def api_alerts_triggers(request: Request):
+    return {"triggers": list(reversed(recent_triggers(get_user_id(request))))}
 
 
 @app.post("/api/alerts/evaluate")
-def api_alerts_evaluate():
-    fired = alert_store.evaluate_all(load_candles)
+def api_alerts_evaluate(request: Request):
+    store = store_for(get_user_id(request))
+    fired = store.evaluate_all(load_candles)
     return {"fired": fired, "count": len(fired)}
 
 
