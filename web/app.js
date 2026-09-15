@@ -1257,13 +1257,23 @@ function renderL2(d) {
 
 /* ---------------- boot ---------------- */
 // תג שגיאה זעיר לאבחון (מופיע רק אם יש שגיאה לא מטופלת)
+// שומר את המחסנית ב-window.__lastError כדי לאפשר אבחון מרחוק
 window.addEventListener("error", ev => {
   try {
+    window.__lastError = {
+      message: ev.message || "unknown",
+      stack: (ev.error && ev.error.stack) ? String(ev.error.stack).slice(0, 2000) : "",
+      file: ev.filename || "",
+      line: ev.lineno || 0,
+      col: ev.colno || 0,
+      time: new Date().toISOString(),
+    };
     if ($("js-err-badge")) return;
     const b = document.createElement("div");
     b.id = "js-err-badge";
     b.textContent = "⚠";
-    b.title = "שגיאה: " + (ev.message || "unknown");
+    b.title = "שגיאה: " + (ev.message || "unknown") +
+      (ev.filename ? "\n" + String(ev.filename).split("/").pop() + ":" + (ev.lineno || "?") : "");
     b.style.cssText = "position:fixed;bottom:6px;left:6px;z-index:9999;background:#7f1d1d;color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:help";
     document.body.appendChild(b);
   } catch (e) {}
