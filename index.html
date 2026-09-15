@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Elroi Terminal — מסוף גרפים</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/static/indicators.js"></script>
+</head>
+<body>
+
+<!-- ======================= סרגל עליון ======================= -->
+<header id="topbar">
+  <div class="logo" id="logo">◈ <span>Elroi Terminal</span></div>
+
+  <button id="symbol-btn" class="tb-btn symbol-btn" title="חיפוש סימול">
+    <span id="tb-symbol">AAPL</span>
+    <span id="tb-price" class="tb-price">—</span>
+    <span id="tb-chg" class="tb-chg"></span>
+  </button>
+
+  <div class="tb-sep"></div>
+
+  <div class="tf-group" id="tf-group">
+    <button class="tf-btn" data-tf="1m">1m</button>
+    <button class="tf-btn" data-tf="5m">5m</button>
+    <button class="tf-btn" data-tf="15m">15m</button>
+    <button class="tf-btn" data-tf="30m">30m</button>
+    <button class="tf-btn" data-tf="1h">1H</button>
+    <button class="tf-btn active" data-tf="1d">D</button>
+    <button class="tf-btn" data-tf="1wk">W</button>
+    <button class="tf-btn" data-tf="1mo">M</button>
+  </div>
+
+  <div class="tb-sep"></div>
+
+  <div class="dropdown">
+    <button id="ctype-btn" class="tb-btn" title="סוג גרף">🕯 <span id="ctype-label">נרות</span> ▾</button>
+    <div id="ctype-menu" class="menu">
+      <button data-ct="candles">🕯 נרות יפניים</button>
+      <button data-ct="bars">▮ ברים</button>
+      <button data-ct="line">∿ קו</button>
+      <button data-ct="area">⛰ אזור</button>
+      <button data-ct="baseline">〜 בייסליין</button>
+      <button data-ct="heikin">🕯 הייקין-אשי</button>
+    </div>
+  </div>
+
+  <div class="dropdown">
+    <button id="ind-btn" class="tb-btn" title="אינדיקטורים" onclick="toggleIndicatorMenu()">ƒx אינדיקטורים ▾</button>
+    <div id="ind-menu" class="menu ind-menu"></div>
+  </div>
+
+  <button id="alert-btn" class="tb-btn" title="התראת מחיר">⏰ התראה</button>
+
+  <button id="ai-btn" class="tb-btn" title="יצירת אינדיקטור ב-AI">✨ AI אינדיקטור</button>
+
+  <div class="tb-sep"></div>
+
+  <div class="dropdown">
+    <button id="layout-btn" class="tb-btn" title="Layouts">🗂 פריסה ▾</button>
+    <div id="layout-menu" class="menu">
+      <button id="layout-save">💾 שמור פריסה נוכחית</button>
+      <div class="menu-sep"></div>
+      <div id="layout-list"></div>
+    </div>
+  </div>
+
+  <div class="tb-spacer"></div>
+  <div id="data-badge" class="data-badge" title="מקור נתונים">—</div>
+</header>
+
+<div id="app">
+  <!-- ======================= סרגל ציור ======================= -->
+  <aside id="drawbar">
+    <button class="tool-btn active" data-tool="cursor" title="סמן (V)">
+      <svg viewBox="0 0 24 24"><path d="M6 3l14 9-8 1.5L8 21z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    </button>
+    <button class="tool-btn" data-tool="trend" title="קו מגמה (T)">
+      <svg viewBox="0 0 24 24"><line x1="4" y1="19" x2="20" y2="5" stroke="currentColor" stroke-width="1.8"/><circle cx="4" cy="19" r="2" fill="currentColor"/><circle cx="20" cy="5" r="2" fill="currentColor"/></svg>
+    </button>
+    <button class="tool-btn" data-tool="hline" title="קו אופקי (H)">
+      <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.8" stroke-dasharray="4 2"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>
+    </button>
+    <button class="tool-btn" data-tool="fib" title="פיבונאצ'י (F)">
+      <svg viewBox="0 0 24 24"><path d="M4 20 V4 M4 20 H20" stroke="currentColor" stroke-width="1.4" fill="none"/><line x1="4" y1="16" x2="12" y2="16" stroke="currentColor" stroke-width="1"/><line x1="4" y1="12" x2="12" y2="12" stroke="currentColor" stroke-width="1"/><line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" stroke-width="1"/></svg>
+    </button>
+    <button class="tool-btn" data-tool="text" title="טקסט (X)">
+      <svg viewBox="0 0 24 24"><text x="6" y="17" font-size="14" fill="currentColor" font-family="sans-serif">א</text></svg>
+    </button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" id="magnet-btn" title="מגנט למחירים">
+      <svg viewBox="0 0 24 24"><path d="M6 4v7a6 6 0 0012 0V4h-4v7a2 2 0 01-4 0V4z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    </button>
+    <button class="tool-btn danger" id="clear-drawings" title="מחק את כל הציורים">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-8 0l1 13h8l1-13" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    </button>
+  </aside>
+
+  <!-- ======================= אזור הגרף ======================= -->
+  <main id="chart-area">
+    <div id="ohlc-legend"></div>
+    <div id="chart"></div>
+    <div id="draw-hint"></div>
+
+    <!-- פאנל תחתון -->
+    <div id="bottom-panel">
+      <div class="bp-tabs">
+        <button class="bp-tab active" data-bp="objects">🌳 עץ אובייקטים</button>
+        <button class="bp-tab" data-bp="alerts">⏰ התראות <span id="alert-count"></span></button>
+        <button class="bp-tab" id="bp-collapse">▾</button>
+      </div>
+      <div class="bp-body" id="bp-body">
+        <div class="bp-page" id="bp-objects"><div id="obj-list" class="obj-list"></div></div>
+        <div class="bp-page hidden" id="bp-alerts"><div id="alert-list" class="obj-list"></div></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ======================= פאנל מעקב ======================= -->
+  <aside id="watchpanel">
+    <div class="wp-tabs">
+      <button class="wp-tab active" data-wp="all">הכל</button>
+      <button class="wp-tab" data-wp="stock">מניות</button>
+      <button class="wp-tab" data-wp="crypto">קריפטו</button>
+      <button class="wp-tab" data-wp="fx">פורקס</button>
+    </div>
+    <div class="wp-search">
+      <input id="wp-add" placeholder="+ הוסף סימול (למשל BTC)">
+      <button id="wp-add-btn">+</button>
+    </div>
+    <div id="wp-list"></div>
+  </aside>
+</div>
+
+<!-- ======================= מודאל חיפוש ======================= -->
+<div id="search-modal" class="modal hidden">
+  <div class="modal-box">
+    <input id="search-input" placeholder="חפש סימול או שם חברה...">
+    <div id="search-results"></div>
+  </div>
+</div>
+
+<!-- ======================= מודאל בונה התראות ======================= -->
+<div id="alert-modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="ab-head">⏰ התראה חדשה — <span id="ab-symbol"></span><button class="ab-x" id="ab-close">✕</button></div>
+    <div class="ab-body">
+      <div class="form-row"><label>שם</label><input id="ab-name" placeholder="אופציונלי — למשל: שבירת התנגדות"></div>
+      <div class="form-row"><label>סוג תנאי</label>
+        <select id="ab-ctype">
+          <option value="rule">חוק: אופרנד מול אופרנד</option>
+          <option value="change_pct">שינוי באחוזים</option>
+        </select>
+      </div>
+      <div id="ab-rule-sec">
+        <div class="form-row"><label>צד שמאל</label>
+          <select id="ab-left-kind"><option value="price">מחיר</option><option value="indicator">אינדיקטור</option></select>
+          <select id="ab-left-ind"></select><input id="ab-left-n" type="number" value="14" min="2" max="300" title="פרמטר">
+        </div>
+        <div class="form-row"><label>תנאי</label><select id="ab-op"></select></div>
+        <div class="form-row"><label>צד ימין</label>
+          <select id="ab-right-kind"><option value="value">ערך</option><option value="price">מחיר</option><option value="indicator">אינדיקטור</option></select>
+          <input id="ab-right-value" type="number" step="any" placeholder="ערך">
+          <select id="ab-right-ind"></select><input id="ab-right-n" type="number" value="14" min="2" max="300" title="פרמטר">
+        </div>
+      </div>
+      <div id="ab-pct-sec" class="hidden">
+        <div class="form-row"><label>טווח</label><input id="ab-period" type="number" value="1" min="1" max="50"><span class="u">נרות</span></div>
+        <div class="form-row"><label>תנאי</label>
+          <select id="ab-pct-op"><option value="greater_than">עלייה גדולה מ־</option><option value="less_than">ירידה גדולה מ־</option></select>
+        </div>
+        <div class="form-row"><label>אחוז</label><input id="ab-pct-value" type="number" step="any" value="3"><span class="u">%</span></div>
+      </div>
+      <div class="form-row"><label>תדירות</label><select id="ab-freq"></select></div>
+      <div class="form-row"><label>תפוגה</label>
+        <select id="ab-exp"><option value="">ללא תפוגה</option><option value="24">24 שעות</option><option value="168">7 ימים</option></select>
+      </div>
+      <div id="ab-error" class="ab-error"></div>
+      <button id="ab-submit" class="ab-submit">צור התראה</button>
+      <div class="ab-note">נבדק אוטומטית כל 5 דקות על נרות יומיים · התראה לטלגרם (אם חובר בוט)</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<!-- ======================= מודאל AI אינדיקטור ======================= -->
+<div id="ai-modal" class="modal hidden">
+  <div class="modal-box" style="width:min(620px,94vw)">
+    <div class="ab-head">✨ אינדיקטור AI<button class="ab-x" id="ai-close">✕</button></div>
+    <div class="ab-body">
+      <div class="ab-tabs">
+        <button class="ab-tab active" data-at="gen">כתוב לי אינדיקטור</button>
+        <button class="ab-tab" data-at="paste">הדבק קוד</button>
+      </div>
+      <div id="ai-gen-sec">
+        <textarea id="ai-prompt" rows="3" placeholder="תאר מה אתה רוצה — למשל: &#10׳RSI עם ממוצע נע 14 עליו, וסמן חציות׳"></textarea>
+        <button id="ai-generate" class="ab-submit">⚙ צור קוד</button>
+        <div id="ai-status" class="ab-note"></div>
+      </div>
+      <div id="ai-paste-sec" class="hidden">
+        <textarea id="ai-code-paste" rows="8" dir="ltr" placeholder="function compute(candles) { ... }"></textarea>
+      </div>
+      <div id="ai-code-wrap" class="hidden">
+        <div class="form-row"><label>שם</label><input id="ai-name" style="flex:1"></div>
+        <pre id="ai-code-view" dir="ltr"></pre>
+        <div class="form-row" style="gap:8px">
+          <button id="ai-embed" class="ab-submit" style="flex:1;margin:0">📈 הטמע בגרף</button>
+          <button id="ai-save" class="tb-btn" style="background:var(--panel2)">💾 שמור לספרייה</button>
+        </div>
+      </div>
+      <div id="ai-error" class="ab-error"></div>
+      <div class="ab-note">מופעל ע״י Hugging Face (מסלול חינמי — ייתכנו הגבלות קצב) · הקוד רץ בדפדפן שלך בלבד</div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
