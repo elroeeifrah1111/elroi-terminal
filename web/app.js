@@ -1270,15 +1270,16 @@ window.addEventListener("error", ev => {
 });
 
 function showChartLibError() {
-  const area = $("chart-area");
-  if (!area || $("chart-lib-err")) return;
+  // הבאנר מכסה רק את אזור הגרף עצמו — הפאנל התחתון (התראות וכו') נשאר נגיש
+  const chartEl = $("chart");
+  if (!chartEl || $("chart-lib-err")) return;
   const d = document.createElement("div");
   d.id = "chart-lib-err";
   d.style.cssText = "position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;background:#0e1220;color:#e5e7eb;z-index:50;text-align:center;padding:20px";
   d.innerHTML = '<div style="font-size:15px">⚠ ספריית הגרפים לא נטענה (בעיית רשת) — שאר המערכת עובדת</div>' +
     '<button id="chart-lib-retry" class="tb-btn" style="font-size:14px">🔄 נסה שוב</button>';
-  area.style.position = "relative";
-  area.appendChild(d);
+  chartEl.style.position = "relative";
+  chartEl.appendChild(d);
   $("chart-lib-retry").addEventListener("click", () => location.reload());
 }
 

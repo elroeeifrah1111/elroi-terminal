@@ -314,6 +314,13 @@ input { font-family: inherit; }
 
 /* ---------- מובייל ---------- */
 @media (max-width: 860px) {
+  /* סרגל עליון נגלל אופקית — כל הכפתורים נגישים בטלפון */
+  #topbar { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  #topbar::-webkit-scrollbar { display: none; }
+  #topbar > * { flex-shrink: 0; }
+  .tb-spacer { display: none; }
+  .logo { font-size: 15px; }
+  .tb-btn { padding: 7px 9px; font-size: 12px; }
   #watchpanel { display: none; }
   #watchpanel.open {
     display: flex; position: fixed; left: 0; top: 46px; bottom: 0;
@@ -324,4 +331,33 @@ input { font-family: inherit; }
   #tb-chg { display: none; }
   #bottom-panel { height: 140px; }
   .logo span { display: none; }
+}
+
+/* ---------- עומק שוק (Level 2) ---------- */
+#l2-panel {
+  position: absolute; top: 10px; bottom: 10px; left: 10px; width: 252px; z-index: 40;
+  background: rgba(14,18,32,.97); border: 1px solid var(--border); border-radius: 10px;
+  display: flex; flex-direction: column; overflow: hidden; font-size: 12px; direction: ltr;
+}
+#l2-panel.hidden { display: none; }
+.l2-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--border); font-weight: 700; direction: rtl; }
+.l2-sub { padding: 4px 10px; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--border); direction: rtl; text-align: right; }
+.l2-rows { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+#l2-asks { justify-content: flex-start; }
+#l2-bids { justify-content: flex-start; border-top: 1px solid var(--border); }
+.l2-row { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 2.5px 10px; }
+.l2-row .bar { position: absolute; top: 0; bottom: 0; right: 0; opacity: .16; }
+.l2-ask .bar { background: var(--down); }
+.l2-bid .bar { background: var(--up); }
+.l2-row span { position: relative; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.l2-ask .p { color: var(--down); }
+.l2-bid .p { color: var(--up); }
+.l2-row .s, .l2-row .t { color: var(--muted); }
+#l2-mid { padding: 6px 10px; text-align: center; font-weight: 800; font-size: 13px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--panel2); }
+.l2-foot { padding: 4px 10px; color: var(--muted); font-size: 10px; text-align: center; }
+.tb-btn.active { background: #24304d; color: var(--accent); }
+@media (max-width: 860px) {
+  #l2-panel { width: 172px; font-size: 11px; }
+  .l2-row { padding: 2px 6px; }
+  #l2-mid { font-size: 12px; padding: 5px 6px; }
 }
