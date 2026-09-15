@@ -39,6 +39,9 @@ var layouts = {};
 var aiLibrary = [];   // {id, name, code, active}
 var aiOverlays = [];  // live series on chart
 
+var supa = { enabled: false, client: null, token: null, user: null, pushTimer: null };
+var lastSyncAt = 0;   // epoch ms of last successful sync (last-write-wins)
+
 window.chart = null; // (set after init)
 
 /* ---------------- helpers ---------------- */
@@ -72,6 +75,17 @@ function uid(prefix) { return (prefix || "d") + Date.now().toString(36) + Math.f
 
 function saveLocal(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 function loadLocal(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+
+/* fetch עם Bearer token של סופאבייס כשמחוברים (ללא טוקן = בקשה רגילה) */
+function authFetch(url, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers);
+  if (supa.token) opts.headers["Authorization"] = "Bearer " + supa.token;
+  return fetch(url, opts);
+}
+function authNeededToast() {
+  if (supa.enabled && !supa.token) showToast("התחבר כדי להשתמש בהתראות בענן 👤");
+}
 
 const DRAW_COLORS = { trend: "#3b82f6", hline: "#f59e0b", fib: "#a855f7", text: "#22c55e" };
 const DRAW_NAMES = { trend: "קו מגמה", hline: "קו אופקי", fib: "פיבונאצ'י", text: "טקסט" };
@@ -443,6 +457,7 @@ function toggleDrawing(id) {
 function persistDrawings() {
   saveLocal("charts_drawings_" + currentSymbol,
     drawings.map(d => ({ type: d.type, visible: d.visible, color: d.color, points: d.points, text: d.text })));
+  schedulePush();
 }
 
 function restoreDrawings() {
@@ -576,6 +591,7 @@ async function refreshWatchlist() {
       watchlist = watchlist.filter(s => s !== btn.dataset.del);
       saveLocal("charts_watchlist", watchlist);
       refreshWatchlist();
+      schedulePush();
     }));
 }
 
@@ -592,6 +608,7 @@ function addToWatchlist(sym) {
     watchlist.push(sym);
     saveLocal("charts_watchlist", watchlist);
     refreshWatchlist();
+    schedulePush();
     showToast(sym + " נוסף לרשימת המעקב");
   }
 }
@@ -599,7 +616,7 @@ function addToWatchlist(sym) {
 /* ---------------- alerts: rule-based, server-side ---------------- */
 async function getAlertMeta() {
   if (alertMeta) return alertMeta;
-  const r = await fetch("/api/alerts/meta");
+  const r = await authFetch("/api/alerts/meta");
   alertMeta = await r.json();
   return alertMeta;
 }
@@ -624,8 +641,9 @@ function describeCondClient(cond) {
 
 async function loadAlerts() {
   try {
-    const r = await fetch("/api/alerts");
-    serverAlerts = (await r.json()).alerts || [];
+    const r = await authFetch("/api/alerts");
+    if (r.status === 401) { authNeededToast(); serverAlerts = []; }
+    else serverAlerts = (await r.json()).alerts || [];
   } catch (e) { serverAlerts = []; }
   renderServerAlerts();
 }
@@ -649,8 +667,8 @@ async function renderServerAlerts() {
       </div>`).join("");
   }
   try {
-    const r = await fetch("/api/alerts/triggers");
-    const tr = (await r.json()).triggers || [];
+    const r = await authFetch("/api/alerts/triggers");
+    const tr = r.ok ? (await r.json()).triggers || [] : [];
     if (tr.length) {
       html += `<div class="menu-sep"></div>` + tr.slice(0, 8).map(t => `
         <div class="obj-row">
@@ -666,7 +684,7 @@ async function renderServerAlerts() {
 window.toggleServerAlert = async id => {
   const a = serverAlerts.find(x => x.id === id);
   if (!a) return;
-  await fetch(`/api/alerts/${id}`, {
+  await authFetch(`/api/alerts/${id}`, {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ active: !a.active }),
   });
@@ -675,7 +693,7 @@ window.toggleServerAlert = async id => {
 
 window.deleteServerAlert = async id => {
   if (!confirm("למחוק את ההתראה?")) return;
-  await fetch(`/api/alerts/${id}`, { method: "DELETE" });
+  await authFetch(`/api/alerts/${id}`, { method: "DELETE" });
   loadAlerts();
 };
 
@@ -754,11 +772,12 @@ async function submitAlert() {
     expires_at,
   };
   try {
-    const r = await fetch("/api/alerts", {
+    const r = await authFetch("/api/alerts", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     const d = await r.json();
+    if (r.status === 401) { authNeededToast(); return; }
     if (!r.ok) throw new Error(d.error || "שגיאה");
     closeAlertBuilder();
     loadAlerts();
@@ -959,7 +978,7 @@ function embedAICode(save) {
   showToast("✨ '" + name + "' הוטמע בגרף" + (save ? " ונשמר לספרייה" : ""));
 }
 
-function saveAILibrary() { saveLocal("charts_ai_library", aiLibrary); }
+function saveAILibrary() { saveLocal("charts_ai_library", aiLibrary); schedulePush(); }
 function loadAILibrary() { aiLibrary = loadLocal("charts_ai_library", []); }
 
 window.toggleAIItem = id => {
@@ -986,6 +1005,179 @@ function renderAISection() {
         <button class="mini" onclick="toggleAIItem('${it.id}')">${it.active ? "👁" : "🚫"}</button>
         <button class="mini del" onclick="deleteAIItem('${it.id}')">✕</button>
       </div>`).join("");
+}
+
+/* ---------------- supabase: auth + cloud sync ---------------- */
+function showAuthOverlay() { $("auth-modal").classList.remove("hidden"); }
+function hideAuthOverlay() { $("auth-modal").classList.add("hidden"); }
+
+function updateAuthBtn() {
+  const b = $("auth-btn");
+  if (!supa.enabled) { b.classList.add("hidden"); return; }
+  b.classList.remove("hidden");
+  if (supa.user) {
+    b.textContent = "👤✓";
+    b.title = "מחובר: " + (supa.user.email || "") + " — לחץ להתנתקות";
+  } else {
+    b.textContent = "👤";
+    b.title = "התחברות לסנכרון ענן";
+  }
+}
+
+async function initSupabase() {
+  try {
+    const r = await fetch("/api/config");
+    const cfg = await r.json();
+    if (!cfg.supabase_url || !cfg.supabase_anon_key || !window.supabase) return;
+    supa.client = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+    supa.enabled = true;
+    lastSyncAt = loadLocal("charts_last_sync", 0);
+    updateAuthBtn();
+    const { data } = await supa.client.auth.getSession();
+    if (data && data.session) {
+      await onSignedIn(data.session);
+    } else {
+      showAuthOverlay();
+    }
+    supa.client.auth.onAuthStateChange((ev, session) => {
+      if (session) onSignedIn(session);
+      else onSignedOut();
+    });
+  } catch (e) {}
+}
+
+async function onSignedIn(session) {
+  supa.token = session.access_token;
+  supa.user = session.user;
+  hideAuthOverlay();
+  updateAuthBtn();
+  await pullAndMerge();
+  loadAlerts();
+}
+
+function onSignedOut() {
+  supa.token = null;
+  supa.user = null;
+  updateAuthBtn();
+}
+
+async function sendMagicLink() {
+  const email = $("auth-email").value.trim();
+  const errEl = $("auth-error"), stEl = $("auth-status");
+  errEl.textContent = "";
+  stEl.textContent = "";
+  if (!email || email.indexOf("@") < 0) { errEl.textContent = "כתובת אימייל לא תקינה"; return; }
+  $("auth-send").disabled = true;
+  try {
+    const { error } = await supa.client.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: location.origin + "/" },
+    });
+    if (error) throw error;
+    stEl.textContent = "📧 קישור נשלח למייל — לחץ עליו והדף יתחבר אוטומטית";
+  } catch (e) {
+    errEl.textContent = e.message || "שגיאה בשליחת הקישור";
+  } finally {
+    $("auth-send").disabled = false;
+  }
+}
+
+async function signOutCloud() {
+  try { await supa.client.auth.signOut(); } catch (e) {}
+  onSignedOut();
+  showToast("התנתקת מהסנכרון — הנתונים המקומיים נשמרו");
+}
+
+/* pull מהשרת ומיזוג ל-state המקומי (last-write-wins לפי updated_at) */
+async function pullAndMerge() {
+  let d;
+  try {
+    const r = await authFetch("/api/sync/pull");
+    if (!r.ok) return;
+    d = await r.json();
+  } catch (e) { return; }
+
+  const newer = row => {
+    try { return new Date(row.updated_at).getTime() > lastSyncAt; } catch (e) { return false; }
+  };
+
+  let touched = false;
+  (d.drawings || []).forEach(row => {
+    if (row.symbol && newer(row)) {
+      saveLocal("charts_drawings_" + row.symbol, row.drawings || []);
+      touched = true;
+    }
+  });
+  if (touched) { restoreDrawings(); renderDrawings(); renderObjList(); }
+
+  const srvLayouts = {};
+  (d.layouts || []).forEach(row => { if (row.name && newer(row)) srvLayouts[row.name] = row.layout || {}; });
+  if (Object.keys(srvLayouts).length) {
+    layouts = Object.assign({}, layouts, srvLayouts);
+    saveLocal("charts_layouts", layouts);
+    renderLayoutList();
+  }
+
+  const wl = (d.watchlists || [])[0];
+  if (wl && Array.isArray(wl.symbols) && wl.symbols.length && newer(wl)) {
+    watchlist = wl.symbols.filter(s => typeof s === "string");
+    saveLocal("charts_watchlist", watchlist);
+    refreshWatchlist();
+  }
+
+  const rows = (d.indicators || []).filter(x => x.name && x.code && newer(x));
+  if (rows.length) {
+    const prevActive = {};
+    aiLibrary.forEach(x => { if (x.active) prevActive[x.name] = 1; });
+    const merged = {};
+    aiLibrary.forEach(x => { merged[x.name] = x; });
+    rows.forEach(x => {
+      merged[x.name] = { id: x.id || uid("ai"), name: x.name, code: x.code, active: !!prevActive[x.name] };
+    });
+    aiLibrary = Object.values(merged);
+    saveAILibrary();
+    renderAIOverlays();
+    renderObjList();
+  }
+
+  lastSyncAt = Date.now();
+  saveLocal("charts_last_sync", lastSyncAt);
+  showToast("☁ הסנכרון הושלם");
+}
+
+/* push עם debounce — נקרא אחרי כל שינוי מקומי */
+function schedulePush() {
+  if (!supa.enabled || !supa.token) return;
+  clearTimeout(supa.pushTimer);
+  supa.pushTimer = setTimeout(pushNow, 2000);
+}
+
+async function pushNow() {
+  if (!supa.enabled || !supa.token) return;
+  const drawings = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf("charts_drawings_") === 0) {
+        const arr = loadLocal(k, []);
+        if (arr && arr.length)
+          drawings.push({ symbol: k.slice("charts_drawings_".length), timeframe: currentInterval, drawings: arr });
+      }
+    }
+  } catch (e) {}
+  const payload = {
+    drawings: drawings.slice(0, 300),
+    layouts: Object.keys(layouts).slice(0, 50).map(n => ({ name: n, layout: layouts[n] })),
+    watchlists: [{ name: "default", symbols: watchlist.slice(0, 200) }],
+    indicators: aiLibrary.slice(0, 100).map(x => ({ name: x.name, code: x.code, description: "" })),
+  };
+  try {
+    const r = await authFetch("/api/sync/push", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (r.ok) { lastSyncAt = Date.now(); saveLocal("charts_last_sync", lastSyncAt); }
+  } catch (e) {}
 }
 
 /* ---------------- boot ---------------- */
@@ -1047,6 +1239,7 @@ function boot() {
       layouts[name] = collectLayout();
       saveLocal("charts_layouts", layouts);
       renderLayoutList();
+      schedulePush();
       showToast("פריסה '" + name + "' נשמרה");
     }
     closeAllMenus();
@@ -1134,6 +1327,18 @@ function boot() {
     b.addEventListener("click", () => $("watchpanel").classList.toggle("open"));
     $("topbar").insertBefore(b, $("data-badge"));
   }
+
+  // התחברות וסנכרון ענן (סופאבייס)
+  $("auth-btn").addEventListener("click", () => {
+    if (!supa.enabled) return;
+    if (supa.user) { if (confirm("להתנתק מהסנכרון?")) signOutCloud(); }
+    else showAuthOverlay();
+  });
+  $("auth-close").addEventListener("click", hideAuthOverlay);
+  $("auth-modal").addEventListener("click", ev => { if (ev.target.id === "auth-modal") hideAuthOverlay(); });
+  $("auth-send").addEventListener("click", sendMagicLink);
+  $("auth-email").addEventListener("keydown", ev => { if (ev.key === "Enter") sendMagicLink(); });
+  initSupabase();
 
   loadAlerts();
   restoreDrawings();

@@ -6,6 +6,7 @@
 <title>Elroi Terminal — מסוף גרפים</title>
 <link rel="stylesheet" href="/static/styles.css">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/static/indicators.js"></script>
 </head>
 <body>
@@ -55,6 +56,8 @@
   <button id="alert-btn" class="tb-btn" title="התראת מחיר">⏰ התראה</button>
 
   <button id="ai-btn" class="tb-btn" title="יצירת אינדיקטור ב-AI">✨ AI אינדיקטור</button>
+
+  <button id="auth-btn" class="tb-btn hidden" title="התחברות לסנכרון ענן">👤</button>
 
   <div class="tb-sep"></div>
 
@@ -185,6 +188,21 @@
 </div>
 
 <div id="toast" class="hidden"></div>
+
+<!-- ======================= מודאל התחברות (סנכרון ענן) ======================= -->
+<div id="auth-modal" class="modal hidden">
+  <div class="modal-box" style="width:min(420px,94vw)">
+    <div class="ab-head">☁ סנכרון ענן<button class="ab-x" id="auth-close">✕</button></div>
+    <div class="ab-body">
+      <div class="ab-note" style="margin-bottom:10px">התחברות עם קישור למייל — מסנכרן ציורים, התראות, רשימות מעקב ואינדיקטורי AI בין המכשירים.</div>
+      <div class="form-row"><label>אימייל</label><input id="auth-email" type="email" dir="ltr" placeholder="you@example.com" style="flex:1"></div>
+      <button id="auth-send" class="ab-submit">📧 שלח קישור התחברות</button>
+      <div id="auth-status" class="ab-note"></div>
+      <div id="auth-error" class="ab-error"></div>
+      <div class="ab-note">אפשר לסגור ולהמשיך מקומית — בלי התחברות אין סנכרון.</div>
+    </div>
+  </div>
+</div>
 
 <!-- ======================= מודאל AI אינדיקטור ======================= -->
 <div id="ai-modal" class="modal hidden">
