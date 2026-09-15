@@ -271,6 +271,38 @@ def _search_universe() -> List[dict]:
     return out
 
 
+_YAHOO_SEARCH_CACHE: Dict[str, tuple] = {}
+_YAHOO_SEARCH_UA = {"User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"}
+
+
+def _yahoo_search(q: str):
+    """Fallback חינמי לחיפוש מניות שלא ברשימה המקומית (ללא מפתח)."""
+    now = time.time()
+    ent = _YAHOO_SEARCH_CACHE.get(q)
+    if ent and now - ent[0] < 300:
+        return ent[1]
+    out = []
+    try:
+        r = requests.get(
+            "https://query2.finance.yahoo.com/v1/finance/search",
+            params={"q": q, "quotesCount": 12, "newsCount": 0},
+            headers=_YAHOO_SEARCH_UA, timeout=10)
+        if r.ok:
+            for qt in r.json().get("quotes", [])[:12]:
+                sym = (qt.get("symbol") or "").upper()
+                if not sym:
+                    continue
+                qtype = (qt.get("quoteType") or "").upper()
+                mkt = "crypto" if qtype == "CRYPTOCURRENCY" else \
+                      "fx" if qtype == "CURRENCY" else "stock"
+                name = qt.get("shortname") or qt.get("longname") or sym
+                out.append({"symbol": sym, "name": name, "market": mkt})
+    except Exception as exc:
+        logger.debug("yahoo search failed for %s: %s", q, exc)
+    _YAHOO_SEARCH_CACHE[q] = (now, out)
+    return out
+
+
 # ----------------------------------------------------------------------------
 # API
 # ----------------------------------------------------------------------------
@@ -330,7 +362,14 @@ def api_search(q: str):
         return {"results": []}
     hits = [x for x in _search_universe()
             if q in x["symbol"] or q in x["name"].upper()][:15]
-    return {"results": hits}
+    # מניות שלא ברשימה המקומית — חיפוש Yahoo חינמי כגיבוי
+    if len(hits) < 8:
+        for y in _yahoo_search(q):
+            if not any(h["symbol"] == y["symbol"] for h in hits):
+                hits.append(y)
+            if len(hits) >= 15:
+                break
+    return {"results": hits[:15]}
 
 
 # ----------------------------------------------------------------------------
