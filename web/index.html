@@ -14,6 +14,7 @@
 
 <!-- ======================= סרגל עליון ======================= -->
 <header id="topbar">
+  <div class="tb-row tb-row-main">
   <div class="logo" id="logo">◈ <span>Elroi Terminal</span></div>
 
   <button id="symbol-btn" class="tb-btn symbol-btn" title="חיפוש סימול">
@@ -21,6 +22,10 @@
     <span id="tb-price" class="tb-price">—</span>
     <span id="tb-chg" class="tb-chg"></span>
   </button>
+
+  <button id="alert-btn" class="tb-btn" title="התראת מחיר">⏰ התראה</button>
+  </div>
+  <div class="tb-row tb-row-tools">
 
   <div class="tb-sep"></div>
 
@@ -50,11 +55,9 @@
   </div>
 
   <div class="dropdown">
-    <button id="ind-btn" class="tb-btn" title="אינדיקטורים" onclick="toggleIndicatorMenu()">ƒx אינדיקטורים ▾</button>
+    <button id="ind-btn" class="tb-btn" title="אינדיקטורים">ƒx אינדיקטורים ▾</button>
     <div id="ind-menu" class="menu ind-menu"></div>
   </div>
-
-  <button id="alert-btn" class="tb-btn" title="התראת מחיר">⏰ התראה</button>
 
   <button id="ai-btn" class="tb-btn" title="יצירת אינדיקטור ב-AI">✨ AI אינדיקטור</button>
 
@@ -75,6 +78,7 @@
 
   <div class="tb-spacer"></div>
   <div id="data-badge" class="data-badge" title="מקור נתונים">—</div>
+  </div>
 </header>
 
 <div id="app">
@@ -248,6 +252,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=8"></script>
+<script src="/static/app.js?v=10"></script>
 </body>
 </html>

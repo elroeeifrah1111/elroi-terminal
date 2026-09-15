@@ -73,6 +73,10 @@ input { font-family: inherit; }
   border-radius: 20px; padding: 4px 10px; white-space: nowrap;
 }
 
+/* שורות הסרגל — בדסקטופ השורות שקופות לפריסה (display:contents),
+   במובייל הן הופכות לשתי שורות אמיתיות */
+.tb-row { display: contents; }
+
 /* ---------- תפריטים נפתחים ---------- */
 .dropdown { position: relative; }
 .menu {
@@ -314,17 +318,29 @@ input { font-family: inherit; }
 
 /* ---------- מובייל ---------- */
 @media (max-width: 860px) {
-  /* סרגל עליון נגלל אופקית — כל הכפתורים נגישים בטלפון */
-  #topbar { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-  #topbar::-webkit-scrollbar { display: none; }
-  #topbar > * { flex-shrink: 0; }
+  /* שתי שורות: עליונה קבועה (לוגו/סימול/התראה), תחתונה נגללת אופקית (כלים) */
+  #topbar {
+    flex-wrap: wrap; height: auto; min-height: 46px;
+    overflow: visible; padding: 6px 10px; row-gap: 6px;
+  }
+  .tb-row { display: flex; align-items: center; gap: 6px; }
+  .tb-row-main { width: 100%; }
+  .tb-row-main #symbol-btn { flex: 1; justify-content: center; }
+  .tb-row-tools {
+    width: 100%; overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch; padding-bottom: 2px;
+  }
+  .tb-row-tools::-webkit-scrollbar { display: none; }
+  .tb-row-tools > * { flex-shrink: 0; }
   .tb-spacer { display: none; }
   .logo { font-size: 15px; }
-  .tb-btn { padding: 7px 9px; font-size: 12px; }
+  .tb-btn { padding: 9px 12px; font-size: 13px; }
+  .tf-btn { padding: 9px 11px; font-size: 13px; }
   #watchpanel { display: none; }
   #watchpanel.open {
-    display: flex; position: fixed; left: 0; top: 46px; bottom: 0;
+    display: flex; position: fixed; left: 0; top: 0; bottom: 0;
     width: min(300px, 84vw); box-shadow: -12px 0 32px rgba(0,0,0,.5);
+    z-index: 200;
   }
   #drawbar { width: 42px; }
   .tf-group .tf-btn[data-tf="1m"], .tf-group .tf-btn[data-tf="30m"] { display: none; }

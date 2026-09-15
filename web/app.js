@@ -249,7 +249,9 @@ function isCrypto(sym) {
 function startLiveIfCrypto() {
   if (!isCrypto(currentSymbol)) return;
   try {
-    liveWS = new WebSocket(`ws://${location.host}/ws/stream?symbol=${encodeURIComponent(currentSymbol)}`);
+    // באתר HTTPS חייבים wss — אחרת הדפדפן חוסם (mixed content)
+    const proto = location.protocol === "https:" ? "wss://" : "ws://";
+    liveWS = new WebSocket(`${proto}${location.host}/ws/stream?symbol=${encodeURIComponent(currentSymbol)}`);
   } catch (e) { return; }
   liveWS.onmessage = ev => {
     try {
@@ -851,9 +853,28 @@ function wireMenu(btnId, menuId, onOpen) {
     const m = $(menuId);
     const was = m.classList.contains("open");
     closeAllMenus();
-    if (!was) { if (onOpen) onOpen(); m.classList.add("open"); }
+    if (!was) { if (onOpen) onOpen(); m.classList.add("open"); positionMenuMobile($(btnId), m); }
   });
 }
+
+/* במובייל התפריטים יושבים בתוך שורה נגללת (overflow-x) — ממקמים אותם כ-fixed
+   מתחת לכפתור כדי שלא ייחתכו */
+window.positionMenuMobile = function(btn, menu) {
+  if (!btn || !menu) return;
+  if (window.innerWidth > 860) {
+    menu.style.position = ""; menu.style.top = ""; menu.style.right = ""; menu.style.left = "";
+    return;
+  }
+  const r = btn.getBoundingClientRect();
+  const mw = Math.min(260, window.innerWidth - 16);
+  menu.style.position = "fixed";
+  menu.style.top = (r.bottom + 6) + "px";
+  menu.style.left = "auto";
+  menu.style.minWidth = mw + "px";
+  let right = window.innerWidth - r.right;
+  right = Math.max(8, Math.min(right, window.innerWidth - mw - 8));
+  menu.style.right = right + "px";
+};
 
 /* ---------------- AI indicator engine (Hugging Face) ---------------- */
 const AI_DENY = ["fetch(", "XMLHttpRequest", "eval(", "Function(", "import(",
@@ -874,15 +895,22 @@ function runAICode(code, candles) {
   const factory = new Function(code + "\nreturn compute;");
   const compute = factory();
   if (typeof compute !== "function") throw new Error("compute אינה פונקציה");
-  const sample = (candles && candles.length ? candles : lastCandles).slice(0, 400);
+  // עותק עמוק — קוד ה-AI לא יוכל להשחית את נתוני הגרף הראשי
+  const src = (candles && candles.length ? candles : lastCandles).slice(0, 400);
+  const sample = src.map(c => Object.assign({}, c));
   const res = compute(sample);
   if (!res || !Array.isArray(res.overlays)) throw new Error("הפונקציה חייבת להחזיר { overlays: [...] }");
   for (const o of res.overlays) {
     if (!Array.isArray(o.values)) throw new Error("כל overlay חייב להכיל values");
-    for (const p of o.values.slice(0, 50)) {
-      if (typeof p.time !== "number" || typeof p.value !== "number" || !isFinite(p.value))
-        throw new Error("ערכים לא תקינים ב-overlay: " + (o.name || ""));
+    // סינון נקודות לא תקינות (null/NaN) במקום כשלון שקט של כל האינדיקטור
+    const clean = [];
+    for (const p of o.values) {
+      if (p && typeof p.time === "number" && isFinite(p.time) &&
+          typeof p.value === "number" && isFinite(p.value))
+        clean.push({ time: p.time, value: p.value });
     }
+    if (!clean.length) throw new Error("אין ערכים תקינים ב-overlay: " + (o.name || ""));
+    o.values = clean;
   }
   return res;
 }
@@ -908,6 +936,7 @@ function renderAIOverlays() {
       }
     } catch (e) {
       console.warn("AI overlay failed:", item.name, e.message);
+      showToast("⚠ אינדיקטור '" + item.name + "' לא הוטמע: " + e.message);
     }
   }
 }
@@ -1361,7 +1390,7 @@ function boot() {
     const m = $("ind-menu");
     const was = m.classList.contains("open");
     closeAllMenus();
-    if (!was) { if (window.renderIndicatorMenu) renderIndicatorMenu(); m.classList.add("open"); }
+    if (!was) { if (window.renderIndicatorMenu) renderIndicatorMenu(); m.classList.add("open"); positionMenuMobile($("ind-btn"), m); }
   });
 
   $("alert-btn").addEventListener("click", openAlertBuilder);
