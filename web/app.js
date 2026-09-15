@@ -1273,7 +1273,8 @@ window.addEventListener("error", ev => {
     b.id = "js-err-badge";
     b.textContent = "⚠";
     b.title = "שגיאה: " + (ev.message || "unknown") +
-      (ev.filename ? "\n" + String(ev.filename).split("/").pop() + ":" + (ev.lineno || "?") : "");
+      (ev.filename ? "\n" + String(ev.filename).split("/").pop() + ":" + (ev.lineno || "?") : "") +
+      (window.__lastError.stack ? "\n" + window.__lastError.stack.slice(0, 1500) : "");
     b.style.cssText = "position:fixed;bottom:6px;left:6px;z-index:9999;background:#7f1d1d;color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:help";
     document.body.appendChild(b);
   } catch (e) {}
