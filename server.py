@@ -260,10 +260,93 @@ _POPULAR_STOCKS = [
     ("USO", "Oil ETF"), ("XLF", "Financials ETF"), ("SMH", "Semiconductors ETF"),
 ]
 
+# רשימת גיבוי מקומית — כדי שחיפוש יעבוד גם כש-Yahoo חוסם את השרת
+_EXTRA_STOCKS = [
+    ("SOFI", "SoFi Technologies"), ("HOOD", "Robinhood"), ("AFRM", "Affirm"),
+    ("NU", "Nu Holdings"), ("RKLB", "Rocket Lab"), ("LUNR", "Intuitive Machines"),
+    ("ASTS", "AST SpaceMobile"), ("IONQ", "IonQ"), ("RGTI", "Rigetti"),
+    ("QBTS", "D-Wave Quantum"), ("GME", "GameStop"), ("AMC", "AMC Entertainment"),
+    ("BB", "BlackBerry"), ("NOK", "Nokia"), ("PLUG", "Plug Power"),
+    ("MARA", "MARA Holdings"), ("RIOT", "Riot Platforms"), ("CLSK", "CleanSpark"),
+    ("HUT", "Hut 8"), ("WULF", "TeraWulf"), ("BITF", "Bitfarms"),
+    ("AVGO", "Broadcom"), ("CRM", "Salesforce"), ("ORCL", "Oracle"),
+    ("ADBE", "Adobe"), ("CSCO", "Cisco"), ("QCOM", "Qualcomm"),
+    ("TXN", "Texas Instruments"), ("AMAT", "Applied Materials"), ("MU", "Micron"),
+    ("LRCX", "Lam Research"), ("KLAC", "KLA Corp"), ("SNPS", "Synopsys"),
+    ("CDNS", "Cadence"), ("PANW", "Palo Alto Networks"), ("CRWD", "CrowdStrike"),
+    ("FTNT", "Fortinet"), ("SNOW", "Snowflake"), ("DDOG", "Datadog"),
+    ("NET", "Cloudflare"), ("TEAM", "Atlassian"), ("WDAY", "Workday"),
+    ("NOW", "ServiceNow"), ("INTU", "Intuit"), ("ADP", "ADP"),
+    ("ANET", "Arista Networks"), ("MRVL", "Marvell"), ("NXPI", "NXP Semiconductors"),
+    ("ON", "onsemi"), ("MCHP", "Microchip"), ("TER", "Teradyne"),
+    ("ENTG", "Entegris"), ("WDC", "Western Digital"), ("STX", "Seagate"),
+    ("DELL", "Dell"), ("HPQ", "HP"), ("HPE", "Hewlett Packard Enterprise"),
+    ("IBM", "IBM"), ("ANSS", "Ansys"), ("VEEV", "Veeva"),
+    ("HUBS", "HubSpot"), ("BILL", "Bill Holdings"), ("GFS", "GlobalFoundries"),
+    ("ARM", "Arm Holdings"), ("TSM", "TSMC"), ("ASML", "ASML"),
+    ("UBER", "Uber"), ("DASH", "DoorDash"), ("ABNB", "Airbnb"),
+    ("SHOP", "Shopify"), ("MELI", "MercadoLibre"), ("SE", "Sea Limited"),
+    ("DKNG", "DraftKings"), ("FLUT", "Flutter Entertainment"),
+    ("MGM", "MGM Resorts"), ("LVS", "Las Vegas Sands"), ("CZR", "Caesars"),
+    ("RIVN", "Rivian"), ("LCID", "Lucid"), ("NIO", "NIO"),
+    ("XPEV", "XPeng"), ("LI", "Li Auto"), ("F", "Ford"), ("GM", "General Motors"),
+    ("STLA", "Stellantis"), ("BABA", "Alibaba"), ("JD", "JD.com"),
+    ("PDD", "PDD Holdings"), ("BIDU", "Baidu"), ("NTES", "NetEase"),
+    ("JPM", "JPMorgan"), ("BAC", "Bank of America"), ("WFC", "Wells Fargo"),
+    ("C", "Citigroup"), ("GS", "Goldman Sachs"), ("MS", "Morgan Stanley"),
+    ("AXP", "American Express"), ("V", "Visa"), ("MA", "Mastercard"),
+    ("SCHW", "Charles Schwab"), ("BLK", "BlackRock"), ("BX", "Blackstone"),
+    ("KKR", "KKR"), ("COF", "Capital One"), ("DFS", "Discover"),
+    ("SYF", "Synchrony"), ("ALLY", "Ally Financial"), ("TFC", "Truist"),
+    ("PNC", "PNC Financial"), ("USB", "US Bancorp"),
+    ("JNJ", "Johnson & Johnson"), ("UNH", "UnitedHealth"), ("LLY", "Eli Lilly"),
+    ("MRK", "Merck"), ("ABBV", "AbbVie"), ("PFE", "Pfizer"),
+    ("MRNA", "Moderna"), ("BNTX", "BioNTech"), ("REGN", "Regeneron"),
+    ("VRTX", "Vertex"), ("GILD", "Gilead"), ("AMGN", "Amgen"),
+    ("BIIB", "Biogen"), ("TMO", "Thermo Fisher"), ("DHR", "Danaher"),
+    ("ISRG", "Intuitive Surgical"), ("SYK", "Stryker"), ("MDT", "Medtronic"),
+    ("ABT", "Abbott"), ("HCA", "HCA Healthcare"), ("CVS", "CVS Health"),
+    ("XOM", "Exxon Mobil"), ("CVX", "Chevron"), ("EOG", "EOG Resources"),
+    ("OXY", "Occidental"), ("SLB", "Schlumberger"), ("HAL", "Halliburton"),
+    ("MPC", "Marathon Petroleum"), ("VLO", "Valero"), ("PSX", "Phillips 66"),
+    ("COP", "ConocoPhillips"), ("FANG", "Diamondback Energy"),
+    ("WMT", "Walmart"), ("TGT", "Target"), ("COST", "Costco"),
+    ("HD", "Home Depot"), ("LOW", "Lowe's"), ("NKE", "Nike"),
+    ("SBUX", "Starbucks"), ("MCD", "McDonald's"), ("DIS", "Disney"),
+    ("CMCSA", "Comcast"), ("T", "AT&T"), ("VZ", "Verizon"), ("TMUS", "T-Mobile"),
+    ("LULU", "Lululemon"), ("DECK", "Deckers"), ("ULTA", "Ulta Beauty"),
+    ("ELF", "e.l.f. Beauty"), ("CROX", "Crocs"),
+    ("PG", "Procter & Gamble"), ("KO", "Coca-Cola"), ("PEP", "PepsiCo"),
+    ("CL", "Colgate"), ("MDLZ", "Mondelez"), ("MNST", "Monster Beverage"),
+    ("KDP", "Keurig Dr Pepper"), ("HSY", "Hershey"),
+    ("BA", "Boeing"), ("CAT", "Caterpillar"), ("DE", "Deere"),
+    ("GE", "GE Aerospace"), ("UPS", "UPS"), ("FDX", "FedEx"),
+    ("LMT", "Lockheed Martin"), ("RTX", "RTX Corp"), ("NOC", "Northrop Grumman"),
+    ("GD", "General Dynamics"), ("TDG", "TransDigm"), ("PH", "Parker Hannifin"),
+    ("EMR", "Emerson"), ("ETN", "Eaton"), ("CMI", "Cummins"), ("PCAR", "Paccar"),
+    ("LIN", "Linde"), ("APD", "Air Products"), ("SHW", "Sherwin-Williams"),
+    ("FCX", "Freeport-McMoRan"), ("NEM", "Newmont"),
+    ("NEE", "NextEra Energy"), ("DUK", "Duke Energy"), ("SO", "Southern Company"),
+    ("AMT", "American Tower"), ("PLD", "Prologis"), ("EQIX", "Equinix"),
+    ("DLR", "Digital Realty"), ("O", "Realty Income"), ("SPG", "Simon Property"),
+    ("XLK", "Tech ETF"), ("XLE", "Energy ETF"), ("XLV", "Health ETF"),
+    ("XLI", "Industrial ETF"), ("XLP", "Staples ETF"), ("XLU", "Utilities ETF"),
+    ("XLB", "Materials ETF"), ("XLRE", "Real Estate ETF"), ("XLC", "Communication ETF"),
+    ("VTI", "Total Stock ETF"), ("VOO", "S&P 500 ETF"), ("VEA", "Developed ETF"),
+    ("VWO", "Emerging ETF"), ("BND", "Bond ETF"), ("AGG", "Bond ETF"),
+    ("ARKK", "ARK Innovation"), ("SOXX", "Semiconductor ETF"), ("SOXL", "Semi 3x Bull"),
+    ("TQQQ", "Nasdaq 3x Bull"), ("SQQQ", "Nasdaq 3x Bear"), ("SPXL", "S&P 3x Bull"),
+    ("SPXS", "S&P 3x Bear"), ("QLD", "Nasdaq 2x Bull"), ("UPRO", "S&P 3x Bull"),
+    ("TMF", "Treasury 3x Bull"), ("EEM", "Emerging Markets ETF"), ("EFA", "EAFE ETF"),
+    ("LABU", "Biotech 3x Bull"), ("TNA", "Small Cap 3x Bull"),
+    ("FAS", "Financial 3x Bull"), ("FAZ", "Financial 3x Bear"), ("TECL", "Tech 3x Bull"),
+]
+
 
 def _search_universe() -> List[dict]:
     ml = market_lists()
     out = [{"symbol": s, "name": n, "market": "stock"} for s, n in _POPULAR_STOCKS]
+    out += [{"symbol": s, "name": n, "market": "stock"} for s, n in _EXTRA_STOCKS]
     out += [{"symbol": x["symbol"], "name": x["name"], "market": "crypto"}
             for x in ml["crypto"]]
     out += [{"symbol": x["symbol"], "name": x["name"], "market": "fx"}
@@ -437,6 +520,41 @@ def api_alerts_create(request: Request, payload: dict):
         return store_for(get_user_id(request)).create(payload or {})
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
+
+
+@app.post("/api/alerts/bulk")
+def api_alerts_bulk_create(request: Request, payload: dict):
+    """Watchlist alert: one alert per symbol, with duplicate prevention."""
+    try:
+        symbols = (payload or {}).get("symbols") or []
+        if not isinstance(symbols, list) or not symbols:
+            return JSONResponse(status_code=400, content={"error": "חסרת רשימת סמלים"})
+        if len(symbols) > 300:
+            return JSONResponse(status_code=400, content={"error": "עד 300 סמלים"})
+        res = store_for(get_user_id(request)).create_bulk(symbols, payload.get("alert") or {})
+        return res
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
+
+
+@app.put("/api/alerts/bulk")
+def api_alerts_bulk_update(request: Request, payload: dict):
+    try:
+        gid = (payload or {}).get("group_id")
+        if not gid:
+            return JSONResponse(status_code=400, content={"error": "חסר group_id"})
+        n = store_for(get_user_id(request)).update_group(gid, payload.get("alert") or {})
+        return {"updated": n}
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
+
+
+@app.delete("/api/alerts/bulk")
+def api_alerts_bulk_delete(request: Request, group_id: str = ""):
+    if not group_id:
+        return JSONResponse(status_code=400, content={"error": "חסר group_id"})
+    n = store_for(get_user_id(request)).delete_group(group_id)
+    return {"deleted": n}
 
 
 @app.patch("/api/alerts/{aid}")

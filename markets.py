@@ -136,12 +136,14 @@ def _coinbase_klines(product: str, gran: int, days: int) -> List[dict]:
     need = max(50, min(_MAX_CANDLES, int(days * 86400 / gran) + 2))
     url = f"https://api.exchange.coinbase.com/products/{product}/candles"
     rows: List[dict] = []
-    end = None
+    # Coinbase מתעלם מפרמט end בלבד — דפדוף בחלונות start+end (עד 300 נרות לעמוד)
+    now = int(time.time())
+    page_end = None
     pages = 0
     while len(rows) < need and pages < 4:
-        params = {"granularity": gran, "limit": 300}
-        if end is not None:
-            params["end"] = end
+        pe = page_end if page_end is not None else now
+        ps = pe - 300 * gran
+        params = {"granularity": gran, "start": ps, "end": pe}
         resp = requests.get(url, params=params, headers=_UA, timeout=15)
         resp.raise_for_status()
         batch = resp.json()
@@ -153,12 +155,16 @@ def _coinbase_klines(product: str, gran: int, days: int) -> List[dict]:
                 "open": float(b[3]), "close": float(b[4]),
                 "volume": float(b[5]),
             })
-        oldest = int(batch[-1][0])
-        end = oldest - 1
+        page_end = ps
         pages += 1
         if len(batch) < 300:
             break
         time.sleep(0.15)
+    # הגנה: הסרת כפילויות זמן (חפיפת גבול בין עמודים עוקבים)
+    seen: Dict[int, dict] = {}
+    for r in rows:
+        seen.setdefault(r["time"], r)
+    rows = sorted(seen.values(), key=lambda r: r["time"], reverse=True)
     return rows[:need]
 
 
@@ -245,6 +251,11 @@ def fetch_crypto_candles(symbol: str, days: int, interval: str) -> Optional[dict
     if not rows:
         return None
     candles = _aggregate(_to_candles(rows), interval)
+    # הגנה אחרונה: זמנים כפולים מקריסים את ספריית הגרפים — מסירים
+    _seen: Dict[int, dict] = {}
+    for c in candles:
+        _seen.setdefault(c["time"], c)
+    candles = sorted(_seen.values(), key=lambda c: c["time"])
     if not candles:
         return None
     return {
