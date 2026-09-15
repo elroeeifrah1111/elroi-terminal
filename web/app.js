@@ -94,7 +94,7 @@ const DRAW_NAMES = { trend: "קו מגמה", hline: "קו אופקי", fib: "פ�
 function initChart() {
   if (typeof LightweightCharts === "undefined")
     throw new Error("chart-lib-missing");
-  chart = LightweightCharts.create($("chart"), {
+  chart = LightweightCharts.createChart($("chart"), {
     layout: {
       background: { type: "solid", color: "#0e1220" },
       textColor: "#8a93a8",
