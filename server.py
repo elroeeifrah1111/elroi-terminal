@@ -33,6 +33,7 @@ from markets import (
     fetch_crypto_quote,
     fetch_fx_candles,
     fetch_fx_quote,
+    fetch_orderbook,
     market_lists,
     normalize_symbol,
 )
@@ -51,8 +52,10 @@ def get_user_id(request: Request) -> str:
     """Resolve the caller's user id.
 
     - Supabase not configured -> "local" (current behaviour, no login needed).
-    - Configured -> the Bearer token is verified against Supabase Auth;
-      missing/invalid token -> 401.
+    - Configured + valid Bearer token -> that user's id (cloud sync).
+    - Configured but no/invalid token -> "local" fallback: the app keeps
+      working fully without login (alerts stored server-side in alerts.json);
+      signing in upgrades to per-user cloud sync.
     """
     if not supa.is_configured():
         return "local"
@@ -61,9 +64,7 @@ def get_user_id(request: Request) -> str:
     if auth.lower().startswith("bearer "):
         token = auth[7:].strip()
     uid = supa.auth_user_id(token) if token else None
-    if not uid:
-        raise HTTPException(status_code=401, detail="נדרשת התחברות")
-    return uid
+    return uid or "local"
 
 
 def store_for(user_id: str) -> AlertStore:
@@ -82,6 +83,13 @@ async def _alert_loop():
                 # Cheap heartbeat: keeps the free Supabase project from
                 # pausing after ~7 days of inactivity, even with no alerts.
                 supa.heartbeat()
+                # Local (not-logged-in) alerts keep being evaluated too.
+                try:
+                    fired = alert_store.evaluate_all(load_candles)
+                    if fired:
+                        logger.info("alert loop fired %d local", len(fired))
+                except Exception as exc:
+                    logger.warning("alert loop local error: %s", exc)
                 for uid in supa.alert_user_ids():
                     try:
                         store_for(uid).evaluate_all(load_candles)
@@ -304,6 +312,15 @@ def api_quotes(symbols: str):
 @app.get("/api/markets")
 def api_markets():
     return market_lists()
+
+
+@app.get("/api/orderbook")
+def api_orderbook(symbol: str):
+    """Level 2 visual depth — crypto only (Coinbase -> Kraken, free, no key)."""
+    ob = fetch_orderbook(symbol)
+    if ob is None:
+        return JSONResponse(status_code=404, content={"error": "עומק שוק זמין לקריפטו בלבד"})
+    return ob
 
 
 @app.get("/api/search")

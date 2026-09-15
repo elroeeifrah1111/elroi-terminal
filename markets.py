@@ -270,6 +270,69 @@ def fetch_crypto_quote(symbol: str) -> Optional[float]:
         return None
 
 
+_OB_CACHE: Dict[str, tuple] = {}
+_OB_TTL = 4.0  # seconds — order book refreshes fast, don't hammer the API
+
+
+def fetch_orderbook(symbol: str) -> Optional[dict]:
+    """Level 2 order book for crypto (visual depth).
+
+    Coinbase book?level=2 (top 50 bids/asks, aggregated) primary,
+    Kraken Depth fallback. Returns:
+        {"symbol", "bids": [[price, size], ...], "asks": [...], "source"}
+    Bids sorted high->low, asks sorted low->high. None for non-crypto
+    or when both providers fail. Free, no key.
+    """
+    product = normalize_symbol(symbol)
+    if detect_market(product) != "crypto":
+        return None
+    now = time.time()
+    hit = _OB_CACHE.get(product)
+    if hit and now - hit[0] < _OB_TTL:
+        return hit[1]
+    data: Optional[dict] = None
+    try:
+        resp = requests.get(
+            f"https://api.exchange.coinbase.com/products/{product}/book",
+            params={"level": 2}, headers=_UA, timeout=10,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        bids = [[float(p), float(s)] for p, s, _ in payload.get("bids", [])]
+        asks = [[float(p), float(s)] for p, s, _ in payload.get("asks", [])]
+        if bids and asks:
+            data = {"symbol": product, "bids": bids, "asks": asks, "source": "coinbase"}
+    except Exception as exc:
+        logger.debug("Coinbase book failed for %s: %s", product, exc)
+    if data is None:
+        try:
+            pair = _kraken_pair(product)
+            resp = requests.get(
+                "https://api.kraken.com/0/public/Depth",
+                params={"pair": pair, "count": 50}, headers=_UA, timeout=10,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            if payload.get("error"):
+                raise RuntimeError(";".join(payload["error"]))
+            result = payload.get("result", {})
+            key = next((k for k in result if k != "last"), None)
+            if key:
+                bids = [[float(p), float(v)] for p, v, _ in result[key].get("bids", [])]
+                asks = [[float(p), float(v)] for p, v, _ in result[key].get("asks", [])]
+                if bids and asks:
+                    data = {"symbol": product, "bids": bids, "asks": asks, "source": "kraken"}
+        except Exception as exc:
+            logger.debug("Kraken depth failed for %s: %s", product, exc)
+    if data is None:
+        return None
+    # keep the payload light for 5s polling: top 50 levels per side
+    data["bids"] = data["bids"][:50]
+    data["asks"] = data["asks"][:50]
+    _OB_CACHE[product] = (now, data)
+    return data
+
+
 def _frankfurter_range(base: str, quote: str, days: int) -> Optional[dict]:
     end = datetime.utcnow().date()
     start = end - timedelta(days=days + 10)
