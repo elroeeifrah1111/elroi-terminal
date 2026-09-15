@@ -529,6 +529,8 @@ function pickSymbol(sym) {
   currentSymbol = sym.toUpperCase();
   restoreDrawings();
   loadChart();
+  updateL2Btn();
+  if (l2Open) loadL2();
 }
 
 /* ---------------- watchlist ---------------- */
@@ -1183,6 +1185,76 @@ async function pushNow() {
   } catch (e) {}
 }
 
+/* ---------------- Level 2 — עומק שוק ויזואלי (קריפטו) ---------------- */
+let l2Open = false;
+let l2Timer = null;
+
+function updateL2Btn() {
+  const b = $("l2-btn");
+  const show = isCrypto(currentSymbol);
+  b.classList.toggle("hidden", !show);
+  if (!show && l2Open) toggleL2(false);
+}
+
+function toggleL2(force) {
+  l2Open = typeof force === "boolean" ? force : !l2Open;
+  $("l2-panel").classList.toggle("hidden", !l2Open);
+  $("l2-btn").classList.toggle("active", l2Open);
+  if (l2Timer) { clearInterval(l2Timer); l2Timer = null; }
+  if (l2Open) {
+    loadL2();
+    l2Timer = setInterval(loadL2, 5000);
+  }
+}
+
+function fmtAmt(v) {
+  if (v == null || isNaN(v)) return "—";
+  if (v === 0) return "0";
+  const a = Math.abs(v);
+  if (a >= 1000) return v.toLocaleString("en-US", { maximumFractionDigits: 1 });
+  if (a >= 1) return String(+v.toFixed(4));
+  return String(+v.toPrecision(4));
+}
+
+async function loadL2() {
+  if (!l2Open || !isCrypto(currentSymbol)) return;
+  try {
+    const r = await fetch(`/api/orderbook?symbol=${encodeURIComponent(currentSymbol)}`);
+    if (!r.ok) throw new Error("no data");
+    renderL2(await r.json());
+  } catch (e) {
+    $("l2-sub").textContent = "אין נתוני עומק כרגע";
+  }
+}
+
+function renderL2(d) {
+  const bids = (d.bids || []).slice(0, 15);
+  const asks = (d.asks || []).slice(0, 15);
+  if (!bids.length || !asks.length) { $("l2-sub").textContent = "אין נתוני עומק כרגע"; return; }
+  const bestBid = bids[0][0], bestAsk = asks[0][0];
+  $("l2-sub").textContent = "ספרד: " + fmtPrice(bestAsk - bestBid);
+  $("l2-mid").textContent = fmtPrice((bestAsk + bestBid) / 2);
+  $("l2-src").textContent = "מקור: " + (d.source || "");
+
+  const mkRow = (p, s, ct, cls, maxT) => {
+    const w = Math.max(2, Math.min(100, (ct / maxT) * 100));
+    return '<div class="l2-row ' + cls + '"><div class="bar" style="width:' + w.toFixed(1) + '%"></div>' +
+      '<span class="p">' + fmtPrice(p) + '</span><span class="s">' + fmtAmt(s) + '</span><span class="t">' + fmtAmt(ct) + '</span></div>';
+  };
+  // asks: מוצג גבוה->נמוך, מצטבר מהצד הטוב (הנמוך)
+  const dispA = asks.slice().reverse();
+  let runA = 0;
+  const cumA = new Array(dispA.length);
+  for (let i = dispA.length - 1; i >= 0; i--) { runA += dispA[i][1]; cumA[i] = runA; }
+  const maxA = runA || 1;
+  $("l2-asks").innerHTML = dispA.map((r, i) => mkRow(r[0], r[1], cumA[i], "l2-ask", maxA)).join("");
+  // bids: מוצג גבוה->נמוך, מצטבר מהצד הטוב (הגבוה)
+  let runB = 0;
+  const cumB = bids.map(r => runB += r[1]);
+  const maxB = runB || 1;
+  $("l2-bids").innerHTML = bids.map((r, i) => mkRow(r[0], r[1], cumB[i], "l2-bid", maxB)).join("");
+}
+
 /* ---------------- boot ---------------- */
 // תג שגיאה זעיר לאבחון (מופיע רק אם יש שגיאה לא מטופלת)
 window.addEventListener("error", ev => {
@@ -1265,6 +1337,10 @@ function boot() {
   $("ai-generate").addEventListener("click", generateAIIndicator);
   $("ai-embed").addEventListener("click", () => embedAICode(false));
   $("ai-save").addEventListener("click", () => embedAICode(true));
+
+  // עומק שוק (Level 2)
+  $("l2-btn").addEventListener("click", () => toggleL2());
+  $("l2-close").addEventListener("click", () => toggleL2(false));
 
   wireMenu("layout-btn", "layout-menu", renderLayoutList);
   $("layout-save").addEventListener("click", () => {
@@ -1378,6 +1454,7 @@ function boot() {
   restoreDrawings();
   loadChart();
   refreshWatchlist();
+  updateL2Btn();
   quoteTimer = setInterval(refreshWatchlist, 20000);
 }
 

@@ -58,6 +58,8 @@
 
   <button id="ai-btn" class="tb-btn" title="יצירת אינדיקטור ב-AI">✨ AI אינדיקטור</button>
 
+  <button id="l2-btn" class="tb-btn hidden" title="עומק שוק — Level 2 (קריפטו)">📊 L2</button>
+
   <button id="auth-btn" class="tb-btn hidden" title="התחברות לסנכרון ענן">👤</button>
 
   <div class="tb-sep"></div>
@@ -107,6 +109,16 @@
     <div id="ohlc-legend"></div>
     <div id="chart"></div>
     <div id="draw-hint"></div>
+
+    <!-- פאנל עומק שוק (Level 2) — קריפטו בלבד -->
+    <div id="l2-panel" class="hidden">
+      <div class="l2-head"><span>📊 עומק שוק</span><button id="l2-close" class="ab-x">✕</button></div>
+      <div class="l2-sub" id="l2-sub">—</div>
+      <div id="l2-asks" class="l2-rows"></div>
+      <div id="l2-mid">—</div>
+      <div id="l2-bids" class="l2-rows"></div>
+      <div class="l2-foot" id="l2-src"></div>
+    </div>
 
     <!-- פאנל תחתון -->
     <div id="bottom-panel">
