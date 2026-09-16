@@ -1237,6 +1237,9 @@ function wireDrawingDrag() {
   };
   el.addEventListener("pointerup", end);
   el.addEventListener("pointercancel", end);
+  // שחרור מחוץ לגרף (מעל סרגל/חלון) חייב לסיים גרירה — אחרת הגרף "נתקע" בלי גלילה
+  window.addEventListener("pointerup", () => { if (drawDrag) end(); });
+  window.addEventListener("pointercancel", () => { if (drawDrag) end(); });
 }
 function renderObjList() {
   const el = $("obj-list");
