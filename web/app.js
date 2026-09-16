@@ -62,7 +62,14 @@ function drawPreviewHline(price) {
     ? `<line x1="0" y1="${y.toFixed(1)}" x2="${w.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${DRAW_COLORS.hline}" stroke-width="1.5" stroke-dasharray="7 5"/>`
     : "";
 }
-var magnetOn = true;
+var magnetMode = "strong"; // off | weak | strong — מצבי הצמדה למחירי הנר
+function cycleMagnet() {
+  magnetMode = magnetMode === "strong" ? "weak" : magnetMode === "weak" ? "off" : "strong";
+  const labels = { strong: "🧲 מגנט חזק — נצמד תמיד ל-OHLC", weak: "🧲 מגנט חלש — נצמד רק ליד הנר", off: "מגנט כבוי" };
+  const btn = $("magnet-btn");
+  if (btn) { btn.classList.toggle("active", magnetMode !== "off"); btn.title = labels[magnetMode]; }
+  showToast(labels[magnetMode]);
+}
 var drawings = [];          // {id,type,visible,color,points:[{time,price}],text}
 var drawSeq = 1;
 
@@ -262,6 +269,7 @@ async function loadChart() {
   clearDrawingSeries();
   clearAIOverlays();
   stopLive();
+  deselectDrawing();
 
   try {
     // timeout של 30 שניות לקריאת הנרות — שרת תקוע לא ישאיר "טוען..." לנצח
@@ -532,7 +540,7 @@ let lastCrossParam = null;
 let ctxOpenedAt = 0;
 
 function snapToCandle(price, time) {
-  if (magnetOn && time) {
+  if (magnetMode !== "off" && time) {
     const c = lastCandles.find(x => x.time === time);
     if (c) {
       const cands = [c.open, c.high, c.low, c.close];
@@ -682,6 +690,7 @@ function setTool(tool) {
   drawingMode = tool;
   pendingPoint = null;
   clearPreview();
+  if (tool !== "cursor") deselectDrawing(); // מעבר לכלי ציור מבטל בחירה; חזרה לסמן שומרת אותה
   document.querySelectorAll(".tool-btn[data-tool]").forEach(b =>
     b.classList.toggle("active", b.dataset.tool === tool));
   const hint = $("draw-hint");
@@ -703,11 +712,19 @@ function priceAtClick(param) {
   try { price = candleSeries.coordinateToPrice(param.point.y); }
   catch (e) { return null; }
   if (price === null || price === undefined || isNaN(price)) return null;
-  if (magnetOn && param.time) {
+  if (magnetMode !== "off" && param.time) {
     const c = lastCandles.find(x => x.time === param.time);
     if (c) {
       const cands = [c.open, c.high, c.low, c.close];
-      price = cands.reduce((a, b) => Math.abs(b - price) < Math.abs(a - price) ? b : a);
+      const nearest = cands.reduce((a, b) => Math.abs(b - price) < Math.abs(a - price) ? b : a);
+      if (magnetMode === "strong") {
+        price = nearest;
+      } else { // weak: נצמד רק אם הסמן קרוב מספיק (עד ~12px)
+        try {
+          const yN = candleSeries.priceToCoordinate(nearest);
+          if (yN !== null && yN !== undefined && Math.abs(yN - param.point.y) <= 12) price = nearest;
+        } catch (e) {}
+      }
     }
   }
   return { time: param.time, price };
@@ -743,11 +760,13 @@ function onChartClick(param) {
 function addDrawing(d) {
   d.id = uid("dw");
   d.visible = true;
+  d.locked = false;
   d.color = d.color || DRAW_COLORS[d.type] || "#3b82f6";
   drawings.push(d);
   renderDrawings();
   renderObjList();
   persistDrawings();
+  selectDrawing(d.id); // כמו ב-TradingView: הציור נשאר נבחר עם ידיות וסרגל צף
 }
 
 function clearDrawingSeries() {
@@ -829,6 +848,7 @@ function deleteDrawing(id) {
     const [d] = drawings.splice(i, 1);
     if (d._series) d._series.forEach(s => { try { chart.removeSeries(s); } catch (e) {} });
     if (d._plines && candleSeries) d._plines.forEach(pl => { try { candleSeries.removePriceLine(pl); } catch (e) {} });
+    if (selectedId === id) deselectDrawing();
     renderTextMarkers();
     renderObjList();
     persistDrawings();
@@ -840,20 +860,384 @@ function toggleDrawing(id) {
   if (d) { d.visible = !d.visible; renderDrawings(); renderObjList(); persistDrawings(); }
 }
 
+/* ---------------- היסטוריית ציורים (Undo/Redo) ---------------- */
+var drawHistory = [];   // מחרוזות JSON של מצבי drawings
+var drawHistIdx = -1;
+var suppressHistory = false;
+var DRAW_HIST_MAX = 50;
+
+function serializeDrawings() {
+  return JSON.stringify(drawings.map(d => ({
+    id: d.id, type: d.type, visible: d.visible, locked: !!d.locked,
+    color: d.color, points: d.points, text: d.text,
+  })));
+}
+function pushDrawHistory() {
+  if (suppressHistory) return;
+  drawHistory.length = drawHistIdx + 1; // חיתוך ענף redo
+  drawHistory.push(serializeDrawings());
+  if (drawHistory.length > DRAW_HIST_MAX) drawHistory.shift();
+  drawHistIdx = drawHistory.length - 1;
+}
+function resetDrawHistory() {
+  drawHistory = [serializeDrawings()];
+  drawHistIdx = 0;
+}
+function applyDrawSnapshot(json) {
+  suppressHistory = true;
+  try {
+    const arr = JSON.parse(json);
+    clearDrawingSeries();
+    drawings = arr.map(d => ({ ...d }));
+    if (selectedId && !drawings.some(d => d.id === selectedId)) deselectDrawing();
+    renderDrawings();
+    renderHandles();
+    renderObjList();
+    persistDrawings();
+  } finally {
+    suppressHistory = false;
+  }
+}
+function undoDraw() {
+  if (drawHistIdx > 0) { drawHistIdx--; applyDrawSnapshot(drawHistory[drawHistIdx]); }
+  else showToast("אין מה לבטל");
+}
+function redoDraw() {
+  if (drawHistIdx < drawHistory.length - 1) { drawHistIdx++; applyDrawSnapshot(drawHistory[drawHistIdx]); }
+  else showToast("אין מה לשחזר");
+}
+window.undoDraw = undoDraw;
+window.redoDraw = redoDraw;
+
 function persistDrawings() {
+  pushDrawHistory();
   saveLocal("charts_drawings_" + currentSymbol,
-    drawings.map(d => ({ type: d.type, visible: d.visible, color: d.color, points: d.points, text: d.text })));
+    drawings.map(d => ({ type: d.type, visible: d.visible, locked: !!d.locked, color: d.color, points: d.points, text: d.text })));
   schedulePush();
 }
 
 function restoreDrawings() {
   const raw = loadLocal("charts_drawings_" + currentSymbol, []);
-  drawings = raw.map(d => ({ ...d, id: uid("dw") }));
+  drawings = raw.map(d => ({ ...d, id: uid("dw"), locked: !!d.locked }));
+  deselectDrawing();
   renderDrawings();
   renderObjList();
+  resetDrawHistory();
 }
 
-/* ---------------- object tree ---------------- */
+/* ---------------- בחירת ציורים, ידיות גרירה וסרגל צף ---------------- */
+var selectedId = null;
+var handlesSvg = null;
+var drawDrag = null;   // {id, handleIdx(-1=גוף), origPoints, startX, startY, moved}
+var dragRaf = 0;
+
+function handlesLayer() {
+  if (handlesSvg) return handlesSvg;
+  handlesSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  handlesSvg.setAttribute("id", "draw-handles-layer");
+  handlesSvg.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:7;";
+  $("chart").appendChild(handlesSvg);
+  return handlesSvg;
+}
+
+function selDrawing() { return drawings.find(d => d.id === selectedId) || null; }
+
+function ptToPx(pt) {
+  try {
+    const x = chart.timeScale().timeToCoordinate(pt.time);
+    const y = candleSeries.priceToCoordinate(pt.price);
+    if (x === null || x === undefined || y === null || y === undefined || !isFinite(x) || !isFinite(y)) return null;
+    return { x, y };
+  } catch (e) { return null; }
+}
+
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+function drawingHitTest(px, py) {
+  // מחזיר את הציור העליון ביותר מתחת לסמן (מהאחרון לראשון)
+  for (let i = drawings.length - 1; i >= 0; i--) {
+    const d = drawings[i];
+    if (!d.visible || d.locked || !d.points || !d.points.length) continue;
+    try {
+      if (d.type === "trend" && d.points.length === 2) {
+        const p1 = ptToPx(d.points[0]), p2 = ptToPx(d.points[1]);
+        if (p1 && p2 && distToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= 10) return d;
+      } else if (d.type === "hline" && d.points.length === 1) {
+        const p = ptToPx(d.points[0]);
+        if (p && Math.abs(py - p.y) <= 10) return d;
+      } else if (d.type === "fib" && d.points.length === 2) {
+        const [a, b] = d.points;
+        const pa = ptToPx(a), pb = ptToPx(b);
+        if (!pa || !pb) continue;
+        const x1 = Math.min(pa.x, pb.x), x2 = Math.max(pa.x, pb.x);
+        const hi = Math.max(a.price, b.price), lo = Math.min(a.price, b.price), diff = hi - lo || 1;
+        let hit = false;
+        for (const lv of [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]) {
+          const y = candleSeries.priceToCoordinate(hi - diff * lv);
+          if (y !== null && y !== undefined && Math.abs(py - y) <= 8 && px >= x1 - 8 && px <= x2 + 8) { hit = true; break; }
+        }
+        if (!hit) {
+          const y1 = Math.min(pa.y, pb.y), y2 = Math.max(pa.y, pb.y);
+          if (px >= x1 && px <= x2 && py >= y1 && py <= y2) hit = true;
+        }
+        if (hit) return d;
+      } else if (d.type === "text" && d.points.length === 1) {
+        const p = ptToPx(d.points[0]);
+        if (p && Math.hypot(px - p.x, py - p.y) <= 16) return d;
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+function handlePositions(d) {
+  // מיקומי פיקסלים של הידיות לציור
+  const pos = [];
+  for (const pt of (d.points || [])) {
+    const p = ptToPx(pt);
+    if (p) pos.push(p);
+  }
+  return pos;
+}
+
+function renderHandles() {
+  const svg = handlesLayer();
+  const d = selDrawing();
+  if (!d || !d.visible) { svg.innerHTML = ""; return; }
+  const pos = handlePositions(d);
+  let html = "";
+  // קו בחירה מקווקו לקו מגמה
+  if (d.type === "trend" && pos.length === 2) {
+    html += `<line x1="${pos[0].x}" y1="${pos[0].y}" x2="${pos[1].x}" y2="${pos[1].y}" stroke="#2962ff" stroke-width="1" stroke-dasharray="4 4" opacity="0.7"/>`;
+  }
+  pos.forEach(p => {
+    html += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="6" fill="#2962ff" stroke="#fff" stroke-width="2"/>`;
+  });
+  svg.innerHTML = html;
+}
+
+function selectDrawing(id) {
+  selectedId = id;
+  renderHandles();
+  positionFloatbar();
+  renderObjList();
+}
+function deselectDrawing() {
+  if (!selectedId) return;
+  selectedId = null;
+  if (handlesSvg) handlesSvg.innerHTML = "";
+  hideFloatbar();
+  renderObjList();
+}
+window.selectDrawing = selectDrawing;
+
+/* --- סרגל צף --- */
+var DRAW_COLORS_CYCLE = ["#2962ff", "#f23645", "#089981", "#ff9800", "#9c27b0", "#00bcd4"];
+function floatbarAnchorPx(d) {
+  const pos = handlePositions(d);
+  if (!pos.length) return null;
+  if (pos.length >= 2) return { x: (pos[0].x + pos[1].x) / 2, y: Math.min(pos[0].y, pos[1].y) };
+  return { x: pos[0].x, y: pos[0].y };
+}
+function positionFloatbar() {
+  const bar = $("draw-floatbar");
+  const d = selDrawing();
+  if (!bar || !d) { hideFloatbar(); return; }
+  const a = floatbarAnchorPx(d);
+  if (!a) { hideFloatbar(); return; }
+  const area = $("chart-area").getBoundingClientRect();
+  const chartRect = $("chart").getBoundingClientRect();
+  const ox = chartRect.left - area.left, oy = chartRect.top - area.top;
+  let x = ox + a.x - 80, y = oy + a.y - 52;
+  x = Math.max(8, Math.min(x, area.width - 170));
+  y = Math.max(8, y);
+  bar.style.left = x + "px";
+  bar.style.top = y + "px";
+  bar.classList.remove("hidden");
+  const lockBtn = bar.querySelector('[data-act="lock"]');
+  if (lockBtn) lockBtn.textContent = d.locked ? "🔒" : "🔓";
+}
+function hideFloatbar() {
+  const bar = $("draw-floatbar");
+  if (bar) bar.classList.add("hidden");
+}
+function wireFloatbar() {
+  const bar = $("draw-floatbar");
+  if (!bar || bar._wired) return;
+  bar._wired = true;
+  bar.addEventListener("click", e => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const d = selDrawing();
+    if (!d) return;
+    const act = btn.dataset.act;
+    if (act === "del") { deleteDrawing(d.id); deselectDrawing(); }
+    else if (act === "dup") duplicateDrawing(d.id);
+    else if (act === "lock") toggleLock(d.id);
+    else if (act === "color") {
+      const i = DRAW_COLORS_CYCLE.indexOf(d.color);
+      d.color = DRAW_COLORS_CYCLE[(i + 1) % DRAW_COLORS_CYCLE.length];
+      renderDrawings(); renderHandles(); renderObjList(); persistDrawings();
+    }
+  });
+}
+
+/* --- פעולות על ציורים --- */
+function duplicateDrawing(id) {
+  const d = drawings.find(x => x.id === id);
+  if (!d) return;
+  const step = barStep();
+  const copy = JSON.parse(JSON.stringify({ type: d.type, visible: d.visible, color: d.color, points: d.points, text: d.text }));
+  copy.points = copy.points.map(p => ({ time: p.time + step * 3, price: p.price }));
+  copy.id = uid("dw");
+  copy.visible = true;
+  copy.locked = false;
+  drawings.push(copy);
+  renderDrawings(); renderObjList(); persistDrawings();
+  selectDrawing(copy.id);
+  showToast("שוכפל 📋");
+}
+function toggleLock(id) {
+  const d = drawings.find(x => x.id === id);
+  if (!d) return;
+  d.locked = !d.locked;
+  if (d.locked && selectedId === id) deselectDrawing();
+  else { renderObjList(); positionFloatbar(); }
+  persistDrawings();
+  showToast(d.locked ? "ננעל 🔒" : "נפתח 🔓");
+}
+window.duplicateDrawing = duplicateDrawing;
+window.toggleLock = toggleLock;
+
+/* --- גרירה: ידיות וגוף --- */
+function chartPixel(e) {
+  const r = $("chart").getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+function pixelToTimePrice(px, py) {
+  // כמו priceAtClick אבל מקואורדינטות פיקסלים (כולל מגנט)
+  let time = null;
+  try { time = chart.timeScale().coordinateToTime(px); } catch (e) {}
+  let price;
+  try { price = candleSeries.coordinateToPrice(py); } catch (e) { return null; }
+  if (price === null || price === undefined || isNaN(price)) return null;
+  if (magnetMode !== "off" && time) {
+    const c = lastCandles.find(x => x.time === time);
+    if (c) {
+      const cands = [c.open, c.high, c.low, c.close];
+      const nearest = cands.reduce((a, b) => Math.abs(b - price) < Math.abs(a - price) ? b : a);
+      if (magnetMode === "strong") price = nearest;
+      else {
+        try {
+          const yN = candleSeries.priceToCoordinate(nearest);
+          if (yN !== null && yN !== undefined && Math.abs(yN - py) <= 12) price = nearest;
+        } catch (e) {}
+      }
+    }
+  }
+  return { time, price };
+}
+function scheduleDragRender() {
+  if (dragRaf) return;
+  dragRaf = requestAnimationFrame(() => {
+    dragRaf = 0;
+    renderDrawings();
+    renderHandles();
+    positionFloatbar();
+  });
+}
+function wireDrawingDrag() {
+  const el = $("chart");
+  if (!el || el._drawDragWired) return;
+  el._drawDragWired = true;
+
+  el.addEventListener("pointerdown", e => {
+    if (drawingMode !== "cursor" || e.button === 2 || !candleSeries) return;
+    const p = chartPixel(e);
+    // קווי התראה קודמים לציורים (התנהגות קיימת)
+    if (typeof alertLineAt === "function" && alertLineAt(p.y)) return;
+    // ידית של הציור הנבחר?
+    const d = selDrawing();
+    if (d && !d.locked) {
+      const pos = handlePositions(d);
+      for (let i = 0; i < pos.length; i++) {
+        if (Math.hypot(p.x - pos[i].x, p.y - pos[i].y) <= 12) {
+          drawDrag = { id: d.id, handleIdx: i, origPoints: JSON.parse(JSON.stringify(d.points)), moved: false };
+          chart.applyOptions({ handleScroll: false, handleScale: false });
+          e.preventDefault();
+          return;
+        }
+      }
+    }
+    // בחירת ציור מתחת לסמן
+    const hit = drawingHitTest(p.x, p.y);
+    if (hit) {
+      selectDrawing(hit.id);
+      drawDrag = { id: hit.id, handleIdx: -1, origPoints: JSON.parse(JSON.stringify(hit.points)), moved: false,
+                   startPx: p.x, startPy: p.y };
+      chart.applyOptions({ handleScroll: false, handleScale: false });
+      e.preventDefault();
+    } else {
+      // לא נלחץ ציור — נשמור מועמד ל-deselect; רק קליק אמיתי (בלי פאן) יבטל בחירה
+      drawDrag = { id: null, handleIdx: -1, moved: false, startPx: p.x, startPy: p.y, emptyClick: true };
+    }
+  });
+
+  el.addEventListener("pointermove", e => {
+    if (!drawDrag || !candleSeries) return;
+    const p = chartPixel(e);
+    if (drawDrag.emptyClick) {
+      // תזוזה של 6px+ = פאן, לא קליק → לא מבטלים בחירה
+      if (Math.hypot(p.x - drawDrag.startPx, p.y - drawDrag.startPy) >= 6) drawDrag = null;
+      return;
+    }
+    const d = drawings.find(x => x.id === drawDrag.id);
+    if (!d) { drawDrag = null; return; }
+    if (drawDrag.handleIdx === -1 && drawDrag.startPx !== undefined) {
+      if (Math.hypot(p.x - drawDrag.startPx, p.y - drawDrag.startPy) < 4) return; // עוד לא זז באמת
+    }
+    const np = pixelToTimePrice(p.x, p.y);
+    if (!np || np.time === null || np.time === undefined) return;
+    drawDrag.moved = true;
+    if (drawDrag.handleIdx >= 0) {
+      d.points[drawDrag.handleIdx] = { time: np.time, price: np.price };
+    } else {
+      // גרירת גוף: הזזה יחסית מצטברת — שומר על שיפוע הקו
+      const o0 = pixelToTimePrice(drawDrag.startPx, drawDrag.startPy);
+      const o1 = np;
+      if (!o0 || o0.time === null || o0.time === undefined) return;
+      const dT = o1.time - o0.time, dP = o1.price - o0.price;
+      d.points = d.points.map(op => ({ time: op.time + dT, price: op.price + dP }));
+      drawDrag.startPx = p.x; drawDrag.startPy = p.y;
+    }
+    scheduleDragRender();
+  });
+
+  const end = () => {
+    if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
+    if (drawDrag) {
+      const dd = drawDrag;
+      drawDrag = null;
+      chart.applyOptions({ handleScroll: true, handleScale: true });
+      if (dd.emptyClick) {
+        // קליק על שטח ריק (לא גרירת פאן) → ביטול בחירה
+        deselectDrawing();
+      } else if (dd.id && dd.moved) {
+        renderDrawings(); renderHandles(); renderObjList(); persistDrawings();
+      } else if (dd.id) {
+        renderHandles(); positionFloatbar();
+      }
+    }
+  };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+}
 function renderObjList() {
   const el = $("obj-list");
   let html = "";
@@ -861,11 +1245,14 @@ function renderObjList() {
     html = `<div class="obj-empty">אין ציורים עדיין — בחר כלי מסרגל הציור משמאל</div>`;
   } else {
     html = drawings.map(d => `
-    <div class="obj-row">
+    <div class="obj-row${d.id === selectedId ? " sel" : ""}${d.locked ? " locked" : ""}" onclick="selectDrawing('${d.id}')">
       <span class="sw" style="background:${d.color}"></span>
-      <span class="nm">${DRAW_NAMES[d.type] || d.type}${d.text ? " · " + escapeHtml(d.text) : ""}</span>
-      <button class="mini" onclick="toggleDrawing('${d.id}')">${d.visible ? "👁" : "🚫"}</button>
-      <button class="mini del" onclick="deleteDrawing('${d.id}')">✕</button>
+      <span class="nm">${d.locked ? "🔒 " : ""}${DRAW_NAMES[d.type] || d.type}${d.text ? " · " + escapeHtml(d.text) : ""}</span>
+      <button class="mini" title="שכפל" onclick="event.stopPropagation();duplicateDrawing('${d.id}')">📋</button>
+      <button class="mini" title="${d.locked ? "פתח נעילה" : "נעל"}"
+        onclick="event.stopPropagation();toggleLock('${d.id}')">${d.locked ? "🔒" : "🔓"}</button>
+      <button class="mini" title="הצג/הסתר" onclick="event.stopPropagation();toggleDrawing('${d.id}')">${d.visible ? "👁" : "🚫"}</button>
+      <button class="mini del" title="מחק" onclick="event.stopPropagation();deleteDrawing('${d.id}')">✕</button>
     </div>`).join("");
   }
   el.innerHTML = html + renderAISection();
@@ -1266,9 +1653,10 @@ function applyLayout(name) {
   restoreDrawings();
   loadChart().then(() => {
     if (window._pendingLayoutDrawings && window._pendingLayoutDrawings.length) {
-      drawings = window._pendingLayoutDrawings.map(d => ({ ...d, id: uid("dw") }));
+      drawings = window._pendingLayoutDrawings.map(d => ({ ...d, id: uid("dw"), locked: !!d.locked }));
       window._pendingLayoutDrawings = null;
-      renderDrawings(); renderObjList();
+      deselectDrawing();
+      renderDrawings(); renderObjList(); pushDrawHistory();
     }
   });
   showToast("פריסה '" + name + "' נטענה");
@@ -1906,10 +2294,34 @@ function boot() {
   // סרגל ציור
   document.querySelectorAll(".tool-btn[data-tool]").forEach(b =>
     b.addEventListener("click", () => setTool(b.dataset.tool)));
-  $("magnet-btn").addEventListener("click", () => {
-    magnetOn = !magnetOn;
-    $("magnet-btn").classList.toggle("active", magnetOn);
-    showToast(magnetOn ? "מגנט הופעל 🧲" : "מגנט כובה");
+  $("magnet-btn").addEventListener("click", cycleMagnet);
+  wireDrawingDrag();
+  wireFloatbar();
+
+  // קיצורי מקלדת לציורים (לא בתוך שדות טקסט)
+  document.addEventListener("keydown", e => {
+    const tag = (e.target && e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || (e.target && e.target.isContentEditable)) return;
+    const k = (e.key || "").toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === "z" && !e.altKey) {
+      e.preventDefault();
+      if (e.shiftKey) redoDraw(); else undoDraw();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && k === "y" && !e.altKey) { e.preventDefault(); redoDraw(); return; }
+    if (e.ctrlKey || e.metaKey) return; // שאר קיצורי Ctrl שמורים לדפדפן
+    if (e.key === "Delete" || e.key === "Backspace") {
+      if (selectedId) { e.preventDefault(); deleteDrawing(selectedId); deselectDrawing(); }
+    } else if (e.key === "Escape") {
+      if (pendingPoint) { pendingPoint = null; clearPreview(); setTool("cursor"); }
+      else deselectDrawing();
+    } else if (e.altKey && !e.ctrlKey && !e.metaKey) {
+      if (k === "t") setTool("trend");
+      else if (k === "h") setTool("hline");
+      else if (k === "f") setTool("fib");
+      else if (k === "x") setTool("text");
+      else if (k === "c" || k === "v") setTool("cursor");
+    }
   });
   $("clear-drawings").addEventListener("click", () => {
     if (!drawings.length) return;

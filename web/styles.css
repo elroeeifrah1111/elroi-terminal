@@ -178,6 +178,27 @@ input { font-family: inherit; }
 }
 #chart-error.hidden { display: none; }
 
+/* סרגל צף הקשרי לציור נבחר */
+#draw-floatbar {
+  position: absolute; z-index: 25;
+  display: flex; gap: 2px; direction: ltr;
+  background: rgba(22,28,45,.96); border: 1px solid var(--accent);
+  border-radius: 10px; padding: 4px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.5);
+}
+#draw-floatbar.hidden { display: none; }
+#draw-floatbar button {
+  background: none; border: none; color: var(--text);
+  font-size: 15px; padding: 6px 9px; border-radius: 7px; cursor: pointer;
+}
+#draw-floatbar button:hover { background: #28304a; }
+#draw-floatbar button.danger:hover { color: var(--down); }
+
+/* עץ אובייקטים: שורת בחירה ונעילה */
+.obj-row { cursor: pointer; }
+.obj-row.sel { background: rgba(41,98,255,.18); outline: 1px solid var(--accent); border-radius: 8px; }
+.obj-row.locked .nm { color: var(--muted); }
+
 /* ---------- פאנל תחתון ---------- */
 #bottom-panel {
   height: 172px;
