@@ -2362,13 +2362,25 @@ function boot() {
       else if (k === "c" || k === "v") setTool("cursor");
     }
   });
+  let clearArm = 0;
   $("clear-drawings").addEventListener("click", () => {
     if (!drawings.length) return;
-    if (confirm("למחוק את כל הציורים על הגרף?")) {
+    const now = Date.now();
+    if (now - clearArm < 3500) {
+      // לחיצה שנייה לאישור — מוחק הכל בלי דיאלוג native (עובד גם באוטומציה ובמובייל)
+      clearArm = 0;
+      $("clear-drawings").classList.remove("armed");
       clearDrawingSeries();
       drawings = [];
+      deselectDrawing();
       renderObjList();
       persistDrawings();
+      showToast("🗑 כל הציורים נמחקו");
+    } else {
+      clearArm = now;
+      $("clear-drawings").classList.add("armed");
+      showToast("לחץ שוב למחיקת כל הציורים");
+      setTimeout(() => $("clear-drawings").classList.remove("armed"), 3500);
     }
   });
 

@@ -178,16 +178,6 @@ input { font-family: inherit; }
 }
 #chart-error.hidden { display: none; }
 
-/* שכבת דיבאג זמנית לגרירת ציורים */
-#drag-debug {
-  position: absolute; top: 8px; left: 8px; z-index: 99;
-  display: none; max-width: 46%; max-height: 60%; overflow: auto;
-  background: rgba(0,0,0,.85); color: #7fff9f; font: 10px/1.5 monospace;
-  padding: 8px; border-radius: 8px; white-space: pre-wrap; direction: ltr;
-  pointer-events: none;
-}
-#drag-debug.on { display: block; }
-
 /* סרגל צף הקשרי לציור נבחר */
 #draw-floatbar {
   position: absolute; z-index: 25;
@@ -208,6 +198,9 @@ input { font-family: inherit; }
 .obj-row { cursor: pointer; }
 .obj-row.sel { background: rgba(41,98,255,.18); outline: 1px solid var(--accent); border-radius: 8px; }
 .obj-row.locked .nm { color: var(--muted); }
+
+/* כפתור מחיקת ציורים במצב "חמוש" (לחיצה שנייה לאישור) */
+#clear-drawings.armed { background: var(--down); color: #fff; }
 
 /* ---------- פאנל תחתון ---------- */
 #bottom-panel {
