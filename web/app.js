@@ -930,15 +930,6 @@ var selectedId = null;
 var handlesSvg = null;
 var drawDrag = null;   // {id, handleIdx(-1=גוף), origPoints, startX, startY, moved}
 var dragRaf = 0;
-var dragDbgLog = [];
-function ddLog(o) {
-  // דיבאג זמני לגרירת ציורים — פעיל רק עם ?dragdebug=1 בכתובת
-  if (!window.__dragDebug) return;
-  dragDbgLog.push(o);
-  if (dragDbgLog.length > 80) dragDbgLog.shift();
-  const el = $("drag-debug");
-  if (el) el.textContent = dragDbgLog.slice(-12).map(x => JSON.stringify(x)).join("\n");
-}
 
 function handlesLayer() {
   if (handlesSvg) return handlesSvg;
@@ -976,7 +967,7 @@ function drawingHitTest(px, py) {
     try {
       if (d.type === "trend" && d.points.length === 2) {
         const p1 = ptToPx(d.points[0]), p2 = ptToPx(d.points[1]);
-        if (p1 && p2 && distToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= 10) return d;
+        if (p1 && p2 && distToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= 14) return d;
       } else if (d.type === "hline" && d.points.length === 1) {
         const p = ptToPx(d.points[0]);
         if (p && Math.abs(py - p.y) <= 10) return d;
@@ -1130,27 +1121,58 @@ function chartPixel(e) {
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 function pixelToTimePrice(px, py) {
+  const r = rawPixelToTimePrice(px, py);
+  if (!r || r.time === null || r.time === undefined) return r;
+  if (magnetMode !== "off" && r.time) {
+    const c = lastCandles.find(x => x.time === r.time);
+    if (c) {
+      const cands = [c.open, c.high, c.low, c.close];
+      const nearest = cands.reduce((a, b) => Math.abs(b - r.price) < Math.abs(a - r.price) ? b : a);
+      if (magnetMode === "strong") r.price = nearest;
+      else {
+        try {
+          const yN = candleSeries.priceToCoordinate(nearest);
+          const yP = candleSeries.priceToCoordinate(r.price);
+          if (yN !== null && yN !== undefined && yP !== null && yP !== undefined && Math.abs(yN - yP) <= 12) r.price = nearest;
+        } catch (e) {}
+      }
+    }
+  }
+  return r;
+}
+// תרגום פיקסל → זמן/מחיר בלי מגנט — לגרירת גוף (תזוזה גולמית וחלקה)
+function rawPixelToTimePrice(px, py) {
   // כמו priceAtClick אבל מקואורדינטות פיקסלים (כולל מגנט)
   let time = null;
   try { time = chart.timeScale().coordinateToTime(px); } catch (e) {}
   let price;
   try { price = candleSeries.coordinateToPrice(py); } catch (e) { return null; }
   if (price === null || price === undefined || isNaN(price)) return null;
-  if (magnetMode !== "off" && time) {
-    const c = lastCandles.find(x => x.time === time);
-    if (c) {
-      const cands = [c.open, c.high, c.low, c.close];
-      const nearest = cands.reduce((a, b) => Math.abs(b - price) < Math.abs(a - price) ? b : a);
-      if (magnetMode === "strong") price = nearest;
-      else {
-        try {
-          const yN = candleSeries.priceToCoordinate(nearest);
-          if (yN !== null && yN !== undefined && Math.abs(yN - py) <= 12) price = nearest;
-        } catch (e) {}
-      }
-    }
-  }
   return { time, price };
+}
+// הצמדה קשיחה (rigid) של ציור שלם למגנט — בסיום גרירת גוף.
+// מחשבת היסט יחיד מנקודת הייחוס ומזיזה את כל הנקודות יחד, כדי לשמר צורה ושיפוע.
+function rigidMagnetSnap(d) {
+  if (magnetMode === "off" || !d.points || !d.points.length) return;
+  const p0 = d.points[0];
+  let best = null, bestDt = Infinity;
+  for (const c of lastCandles) {
+    const dt = Math.abs(c.time - p0.time);
+    if (dt < bestDt) { bestDt = dt; best = c; }
+  }
+  if (!best) return;
+  const cands = [best.open, best.high, best.low, best.close];
+  let nearest = cands[0];
+  for (const v of cands) if (Math.abs(v - p0.price) < Math.abs(nearest - p0.price)) nearest = v;
+  if (magnetMode === "weak") {
+    try {
+      const yN = candleSeries.priceToCoordinate(nearest);
+      const yP = candleSeries.priceToCoordinate(p0.price);
+      if (yN === null || yN === undefined || yP === null || yP === undefined || Math.abs(yN - yP) > 12) return;
+    } catch (e) { return; }
+  }
+  const off = nearest - p0.price;
+  if (off !== 0 && isFinite(off)) d.points = d.points.map(q => ({ time: q.time, price: q.price + off }));
 }
 function scheduleDragRender() {
   if (dragRaf) return;
@@ -1178,8 +1200,6 @@ function wireDrawingDrag() {
       for (let i = 0; i < pos.length; i++) {
         if (Math.hypot(p.x - pos[i].x, p.y - pos[i].y) <= 12) {
           drawDrag = { id: d.id, handleIdx: i, origPoints: JSON.parse(JSON.stringify(d.points)), moved: false };
-          ddLog({ ev: "down", x: Math.round(p.x), y: Math.round(p.y), branch: "handle", idx: i, id: d.id,
-                  handles: pos.map(q => ({ x: Math.round(q.x), y: Math.round(q.y) })) });
           chart.applyOptions({ handleScroll: false, handleScale: false });
           e.preventDefault();
           return;
@@ -1191,8 +1211,7 @@ function wireDrawingDrag() {
     if (hit) {
       selectDrawing(hit.id);
       drawDrag = { id: hit.id, handleIdx: -1, origPoints: JSON.parse(JSON.stringify(hit.points)), moved: false,
-                   startPx: p.x, startPy: p.y };
-      ddLog({ ev: "down", x: Math.round(p.x), y: Math.round(p.y), branch: "body", id: hit.id });
+                   startPx: p.x, startPy: p.y, startRaw: rawPixelToTimePrice(p.x, p.y) };
       chart.applyOptions({ handleScroll: false, handleScale: false });
       e.preventDefault();
     } else {
@@ -1218,18 +1237,17 @@ function wireDrawingDrag() {
     if (!np || np.time === null || np.time === undefined) return;
     drawDrag.moved = true;
     if (drawDrag.handleIdx >= 0) {
+      // גרירת ידית — עם מגנט (הצמדה חיה ל-OHLC)
       d.points[drawDrag.handleIdx] = { time: np.time, price: np.price };
-      ddLog({ ev: "hmove", i: drawDrag.handleIdx, np: { t: np.time, p: +np.price.toFixed(2) } });
     } else {
-      // גרירת גוף: הזזה יחסית מצטברת — שומר על שיפוע הקו
-      const o0 = pixelToTimePrice(drawDrag.startPx, drawDrag.startPy);
-      const o1 = np;
-      if (!o0 || o0.time === null || o0.time === undefined) { ddLog({ ev: "move", err: "o0null" }); return; }
+      // גרירת גוף: תזוזה גולמית (בלי מגנט) מנקודת ההתחלה — חלק, rigid, לא נתקע.
+      // הצמדת המגנט נעשית פעם אחת בסיום הגרירה (rigidMagnetSnap).
+      const o0 = drawDrag.startRaw;
+      const o1 = rawPixelToTimePrice(p.x, p.y);
+      if (!o0 || !o1 || o0.time === null || o0.time === undefined ||
+          o1.time === null || o1.time === undefined) return;
       const dT = o1.time - o0.time, dP = o1.price - o0.price;
-      ddLog({ ev: "move", dT: dT, dP: +dP.toFixed(2),
-              pts: d.points.map(q => ({ t: q.time, p: +q.price.toFixed(2) })) });
-      d.points = d.points.map(op => ({ time: op.time + dT, price: op.price + dP }));
-      drawDrag.startPx = p.x; drawDrag.startPy = p.y;
+      d.points = drawDrag.origPoints.map(op => ({ time: op.time + dT, price: op.price + dP }));
     }
     scheduleDragRender();
   });
@@ -1244,6 +1262,9 @@ function wireDrawingDrag() {
         // קליק על שטח ריק (לא גרירת פאן) → ביטול בחירה
         deselectDrawing();
       } else if (dd.id && dd.moved) {
+        const d = drawings.find(x => x.id === dd.id);
+        // בסיום גרירת גוף — הצמדה קשיחה אחת למגנט (אם דלוק), לשמירת יישור OHLC
+        if (d && dd.handleIdx === -1) rigidMagnetSnap(d);
         renderDrawings(); renderHandles(); renderObjList(); persistDrawings();
       } else if (dd.id) {
         renderHandles(); positionFloatbar();
@@ -2315,14 +2336,6 @@ function boot() {
   $("magnet-btn").addEventListener("click", cycleMagnet);
   wireDrawingDrag();
   wireFloatbar();
-  // דיבאג גרירה זמני: ?dragdebug=1 מציג שכבת לוג ירוקה
-  try {
-    if (new URLSearchParams(location.search).get("dragdebug") === "1") {
-      window.__dragDebug = true;
-      const dd = $("drag-debug");
-      if (dd) dd.classList.add("on");
-    }
-  } catch (e) {}
 
   // קיצורי מקלדת לציורים (לא בתוך שדות טקסט)
   document.addEventListener("keydown", e => {
