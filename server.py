@@ -74,31 +74,48 @@ def store_for(user_id: str) -> AlertStore:
                       storage=SupabaseAlertStorage(user_id))
 
 
+def _evaluate_all_alerts_blocking():
+    """כל עבודת הסריקה הסינכרונית (כולל קריאות רשת חוסמות ל-Yahoo/Supabase).
+
+    חייב לרוץ ב-thread נפרד — לעולם לא ישירות על ה-event loop!
+    """
+    if supa.is_configured():
+        # Cheap heartbeat: keeps the free Supabase project from
+        # pausing after ~7 days of inactivity, even with no alerts.
+        supa.heartbeat()
+        # Local (not-logged-in) alerts keep being evaluated too.
+        try:
+            fired = alert_store.evaluate_all(load_candles)
+            if fired:
+                logger.info("alert loop fired %d local", len(fired))
+        except Exception as exc:
+            logger.warning("alert loop local error: %s", exc)
+        for uid in supa.alert_user_ids():
+            try:
+                store_for(uid).evaluate_all(load_candles)
+            except Exception as exc:
+                logger.warning("alert loop user %s error: %s", uid, exc)
+    else:
+        fired = alert_store.evaluate_all(load_candles)
+        if fired:
+            logger.info("alert loop fired %d", len(fired))
+
+
 async def _alert_loop():
-    """Background evaluation of rule-based alerts every 5 minutes."""
+    """Background evaluation of rule-based alerts every 5 minutes.
+
+    ההערכה רצה ב-thread נפרד עם timeout — כדי שקריאת רשת תקועה
+    (למשל ל-Yahoo) לא תקפיא את כל השרת.
+    """
     await asyncio.sleep(60)  # let the server settle first
     while True:
         try:
-            if supa.is_configured():
-                # Cheap heartbeat: keeps the free Supabase project from
-                # pausing after ~7 days of inactivity, even with no alerts.
-                supa.heartbeat()
-                # Local (not-logged-in) alerts keep being evaluated too.
-                try:
-                    fired = alert_store.evaluate_all(load_candles)
-                    if fired:
-                        logger.info("alert loop fired %d local", len(fired))
-                except Exception as exc:
-                    logger.warning("alert loop local error: %s", exc)
-                for uid in supa.alert_user_ids():
-                    try:
-                        store_for(uid).evaluate_all(load_candles)
-                    except Exception as exc:
-                        logger.warning("alert loop user %s error: %s", uid, exc)
-            else:
-                fired = alert_store.evaluate_all(load_candles)
-                if fired:
-                    logger.info("alert loop fired %d", len(fired))
+            await asyncio.wait_for(
+                asyncio.to_thread(_evaluate_all_alerts_blocking),
+                timeout=240,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("alert loop timed out after 240s, skipping cycle")
         except Exception as exc:
             logger.warning("alert loop error: %s", exc)
         await asyncio.sleep(300)
