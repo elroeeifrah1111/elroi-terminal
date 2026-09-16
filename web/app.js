@@ -264,7 +264,15 @@ async function loadChart() {
   stopLive();
 
   try {
-    const r = await fetch(`/api/candles?symbol=${encodeURIComponent(currentSymbol)}&period=${currentPeriod}&interval=${currentInterval}`);
+    // timeout של 30 שניות לקריאת הנרות — שרת תקוע לא ישאיר "טוען..." לנצח
+    const ctl = new AbortController();
+    const fetchTimer = setTimeout(() => ctl.abort(), 30000);
+    let r;
+    try {
+      r = await fetch(`/api/candles?symbol=${encodeURIComponent(currentSymbol)}&period=${currentPeriod}&interval=${currentInterval}`, { signal: ctl.signal });
+    } finally {
+      clearTimeout(fetchTimer);
+    }
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || "שגיאה בטעינה");
     // סינון הגנתי: נר עם ערך לא תקין מקריס את ספריית הגרפים ("Value is null")
@@ -289,7 +297,8 @@ async function loadChart() {
     updateBadge();
     startLiveIfCrypto();
   } catch (e) {
-    showToast("שגיאה: " + e.message);
+    const timedOut = e && e.name === "AbortError";
+    showToast(timedOut ? "⏳ השרת לא מגיב — נסה שוב" : "שגיאה: " + e.message);
     $("tb-price").textContent = "—";
     $("chart-error").classList.remove("hidden");
   }
