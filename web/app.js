@@ -124,6 +124,8 @@ function loadLocal(k, d) { try { const v = localStorage.getItem(k); return v ? J
 function authFetch(url, opts) {
   opts = opts || {};
   opts.headers = Object.assign({}, opts.headers);
+  // בלי cache — כדי שרשימות (התראות וכו') יתעדכנו מיד אחרי שינוי, בלי שורה "תקועה" עד רענון
+  if (!opts.cache) opts.cache = "no-store";
   if (supa.token) opts.headers["Authorization"] = "Bearer " + supa.token;
   return fetch(url, opts);
 }
@@ -1348,18 +1350,27 @@ function runAICode(code, candles) {
 function clearAIOverlays() {
   aiOverlays.forEach(s => { try { chart.removeSeries(s); } catch (e) {} });
   aiOverlays = [];
+  // איפוס דגל האוסצילטור של AI וסידור מחדש של החלוניות (גם בקריאה עצמאית)
+  window._aiOscActive = false;
+  if (window.layoutIndicatorPanes) { try { window.layoutIndicatorPanes(); } catch (e) {} }
 }
 
 function renderAIOverlays() {
   clearAIOverlays();
+  // אוסצילטורי AI (RSI/MACD/סטוקסטיק/ATR...) מקבלים חלונית נפרדת כמו בתפריט האינדיקטורים.
+  // הזיהוי לפי השם: התבניות המובנות והפרומפט מחייבים "(אוסצילטור)"/"oscillator" בשם האוסצילטור.
+  let aiOsc = false;
   for (const item of aiLibrary) {
     if (!item.active) continue;
     try {
       const res = runAICode(item.code, lastCandles);
       for (const o of res.overlays) {
+        const isOsc = /אוסצילטור|oscillator/i.test(o.name || "");
+        if (isOsc) aiOsc = true;
         const s = chart.addLineSeries({
           color: o.color || "#22d3ee", lineWidth: o.width || 1,
           priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+          priceScaleId: isOsc ? "osc-pane" : "right",
         });
         s.setData(o.values);
         aiOverlays.push(s);
@@ -1369,6 +1380,8 @@ function renderAIOverlays() {
       showToast("⚠ אינדיקטור '" + item.name + "' לא הוטמע: " + e.message);
     }
   }
+  window._aiOscActive = aiOsc;
+  if (window.layoutIndicatorPanes) { try { window.layoutIndicatorPanes(); } catch (e) {} }
 }
 
 function openAIModal() {

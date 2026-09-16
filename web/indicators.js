@@ -107,7 +107,8 @@
   }
 
   function layoutPanes() {
-    const vol = !!active.volume, osc = !!(active.rsi || active.macd);
+    // window._aiOscActive נקבע ע"י app.js כשאינדיקטור AI אוסצילטור פעיל — חולקים את אותה חלונית
+    const vol = !!active.volume, osc = !!(active.rsi || active.macd || window._aiOscActive);
     try {
       chart.priceScale("right").applyOptions({
         scaleMargins: { top: 0.06, bottom: (vol || osc) ? 0.28 : 0.06 },
@@ -275,5 +276,6 @@
   window.applyIndicators = applyAll;
   window.renderIndicatorMenu = renderMenu;
   window.toggleIndicatorMenu = toggleMenu;
+  window.layoutIndicatorPanes = layoutPanes; // נקרא גם מ-app.js אחרי שינויי אינדיקטורי AI
   window._wantIndicators = wantOn;
 })();
