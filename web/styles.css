@@ -178,6 +178,16 @@ input { font-family: inherit; }
 }
 #chart-error.hidden { display: none; }
 
+/* שכבת דיבאג זמנית לגרירת ציורים */
+#drag-debug {
+  position: absolute; top: 8px; left: 8px; z-index: 99;
+  display: none; max-width: 46%; max-height: 60%; overflow: auto;
+  background: rgba(0,0,0,.85); color: #7fff9f; font: 10px/1.5 monospace;
+  padding: 8px; border-radius: 8px; white-space: pre-wrap; direction: ltr;
+  pointer-events: none;
+}
+#drag-debug.on { display: block; }
+
 /* סרגל צף הקשרי לציור נבחר */
 #draw-floatbar {
   position: absolute; z-index: 25;

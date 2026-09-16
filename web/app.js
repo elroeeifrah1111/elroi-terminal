@@ -930,6 +930,15 @@ var selectedId = null;
 var handlesSvg = null;
 var drawDrag = null;   // {id, handleIdx(-1=גוף), origPoints, startX, startY, moved}
 var dragRaf = 0;
+var dragDbgLog = [];
+function ddLog(o) {
+  // דיבאג זמני לגרירת ציורים — פעיל רק עם ?dragdebug=1 בכתובת
+  if (!window.__dragDebug) return;
+  dragDbgLog.push(o);
+  if (dragDbgLog.length > 80) dragDbgLog.shift();
+  const el = $("drag-debug");
+  if (el) el.textContent = dragDbgLog.slice(-12).map(x => JSON.stringify(x)).join("\n");
+}
 
 function handlesLayer() {
   if (handlesSvg) return handlesSvg;
@@ -1169,6 +1178,8 @@ function wireDrawingDrag() {
       for (let i = 0; i < pos.length; i++) {
         if (Math.hypot(p.x - pos[i].x, p.y - pos[i].y) <= 12) {
           drawDrag = { id: d.id, handleIdx: i, origPoints: JSON.parse(JSON.stringify(d.points)), moved: false };
+          ddLog({ ev: "down", x: Math.round(p.x), y: Math.round(p.y), branch: "handle", idx: i, id: d.id,
+                  handles: pos.map(q => ({ x: Math.round(q.x), y: Math.round(q.y) })) });
           chart.applyOptions({ handleScroll: false, handleScale: false });
           e.preventDefault();
           return;
@@ -1181,6 +1192,7 @@ function wireDrawingDrag() {
       selectDrawing(hit.id);
       drawDrag = { id: hit.id, handleIdx: -1, origPoints: JSON.parse(JSON.stringify(hit.points)), moved: false,
                    startPx: p.x, startPy: p.y };
+      ddLog({ ev: "down", x: Math.round(p.x), y: Math.round(p.y), branch: "body", id: hit.id });
       chart.applyOptions({ handleScroll: false, handleScale: false });
       e.preventDefault();
     } else {
@@ -1207,12 +1219,15 @@ function wireDrawingDrag() {
     drawDrag.moved = true;
     if (drawDrag.handleIdx >= 0) {
       d.points[drawDrag.handleIdx] = { time: np.time, price: np.price };
+      ddLog({ ev: "hmove", i: drawDrag.handleIdx, np: { t: np.time, p: +np.price.toFixed(2) } });
     } else {
       // גרירת גוף: הזזה יחסית מצטברת — שומר על שיפוע הקו
       const o0 = pixelToTimePrice(drawDrag.startPx, drawDrag.startPy);
       const o1 = np;
-      if (!o0 || o0.time === null || o0.time === undefined) return;
+      if (!o0 || o0.time === null || o0.time === undefined) { ddLog({ ev: "move", err: "o0null" }); return; }
       const dT = o1.time - o0.time, dP = o1.price - o0.price;
+      ddLog({ ev: "move", dT: dT, dP: +dP.toFixed(2),
+              pts: d.points.map(q => ({ t: q.time, p: +q.price.toFixed(2) })) });
       d.points = d.points.map(op => ({ time: op.time + dT, price: op.price + dP }));
       drawDrag.startPx = p.x; drawDrag.startPy = p.y;
     }
@@ -2300,6 +2315,14 @@ function boot() {
   $("magnet-btn").addEventListener("click", cycleMagnet);
   wireDrawingDrag();
   wireFloatbar();
+  // דיבאג גרירה זמני: ?dragdebug=1 מציג שכבת לוג ירוקה
+  try {
+    if (new URLSearchParams(location.search).get("dragdebug") === "1") {
+      window.__dragDebug = true;
+      const dd = $("drag-debug");
+      if (dd) dd.classList.add("on");
+    }
+  } catch (e) {}
 
   // קיצורי מקלדת לציורים (לא בתוך שדות טקסט)
   document.addEventListener("keydown", e => {
