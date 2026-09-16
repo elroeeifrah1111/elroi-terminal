@@ -326,7 +326,9 @@ TARGET API (follow strictly):
 - Define exactly one function: function compute(candles)
 - Input: candles = array of {time (unix seconds), open, high, low, close, volume (number or null)}
 - Output: { overlays: [ {name, color, width, values} ] } where values = [{time, value}] aligned 1:1 with input candles by time.
-- overlays are drawn on the main price chart.
+- Overlays are drawn on the main price chart, EXCEPT overlays whose name marks them as
+  oscillators (the name contains "אוסצילטור" or "oscillator", e.g. "RSI 14 (אוסצילטור)") —
+  those are placed automatically in a separate oscillator pane with their own scale.
 
 RULES:
 - Pure computation only. No network, no DOM, no storage, no eval, no Function constructor.
