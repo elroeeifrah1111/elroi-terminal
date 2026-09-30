@@ -109,7 +109,21 @@
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
-  async function runVerify() {
+ /* מחכה שהגרף הראשי יטען סימול חדש (אחרי pickSymbol) */
+function waitForChartSymbol(sym, timeoutMs) {
+  const t0 = Date.now();
+  return new Promise((resolve) => {
+    (function poll() {
+      const s = ($("tb-symbol").textContent || "").trim().toUpperCase();
+      const price = ($("tb-price").textContent || "").trim();
+      const loading = price === "טוען..." || price === "—";
+      if (s === sym && !loading) return resolve(true);
+      if (Date.now() - t0 > timeoutMs) return resolve(false);
+      setTimeout(poll, 400);
+    })();
+  });
+}
+ async function runVerify() {
     const btn = $("aiv-run");
     const box = $("aiv-result");
     const entry = parseFloat(($("aiv-entry").value || "").trim());
@@ -118,8 +132,14 @@
       box.textContent = "הזן מחיר כניסה מספרי";
       return;
     }
-    const payload = {
-      symbol: ($("aiv-symbol").value || "").trim().toUpperCase(),
+    const sym = ($("aiv-symbol").value || "").trim().toUpperCase();
+    if (!sym) {
+      box.className = "aiv-result aiv-err";
+      box.textContent = "הזן סימול";
+      return;
+    }
+    const sym = ($("aiv-symbol").value || "").trim().toUpperCase(); if (!sym) { box.textContent = "הזן סימול"; return; } if (typeof pickSymbol === "function" && sym !== currentSym()) { btn.disabled = true; try { pickSymbol(sym); } catch (e) {} const loaded = await waitForChartSymbol(sym, 30000); btn.disabled = false; if (!loaded) { box.textContent = "הגרף לא נטען"; return; } const b64 = captureChartB64(); if (!b64) { box.textContent = "לא הצלחתי לצלם"; return; } $("aiv-img").src = "data:image/jpeg;base64," + b64; $("aiv-img").dataset.b64 = b64; $("aiv-tf").value = currentTimeframe(); }    const payload = {
+      symbol: sym,
       timeframe: ($("aiv-tf").value || "").trim(),
       entry_price: entry,
       direction: $("aiv-dir").value,
