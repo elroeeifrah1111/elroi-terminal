@@ -2395,13 +2395,15 @@ function boot() {
   $("wp-add-btn").addEventListener("click", addSym);
   $("wp-add").addEventListener("keydown", ev => { if (ev.key === "Enter") addSym(); });
 
-  // פאנל תחתון
+  // פאנל תחתון (generic — supports tabs injected by scanner/sandbox/strategy modules)
   document.querySelectorAll(".bp-tab[data-bp]").forEach(b =>
-    b.addEventListener("click", () => {
-      document.querySelectorAll(".bp-tab[data-bp]").forEach(x => x.classList.toggle("active", x === b));
-      $("bp-objects").classList.toggle("hidden", b.dataset.bp !== "objects");
-      $("bp-alerts").classList.toggle("hidden", b.dataset.bp !== "alerts");
-    }));
+    b.addEventListener("click", () => switchBpTab(b)));
+  function switchBpTab(b) {
+    document.querySelectorAll(".bp-tab[data-bp]").forEach(x => x.classList.toggle("active", x === b));
+    document.querySelectorAll(".bp-page").forEach(p =>
+      p.classList.toggle("hidden", p.id !== "bp-" + b.dataset.bp));
+  }
+  window.switchBpTab = switchBpTab;
   $("bp-collapse").addEventListener("click", () => {
     const p = $("bottom-panel");
     p.classList.toggle("collapsed");
