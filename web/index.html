@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Elroi Terminal — מסוף גרפים</title>
 <link rel="stylesheet" href="/static/styles.css?v=4">
+  <link rel="stylesheet" href="/static/ai_scan.css?v=1">
 <!-- ספריית הגרפים מקומית מהשרת — אין תלות ב-CDN חיצוני -->
 <script src="/static/vendor/lightweight-charts.standalone.production.js?v=1"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -16,8 +17,9 @@
 <header id="topbar">
   <div class="tb-row tb-row-main">
   <div class="logo" id="logo">◈ <span>Elroi Terminal</span></div>
-
+  
   <button id="symbol-btn" class="tb-btn symbol-btn" title="חיפוש סימול">
+
     <span id="tb-symbol">AAPL</span>
     <span id="tb-price" class="tb-price">—</span>
     <span id="tb-chg" class="tb-chg"></span>
@@ -72,6 +74,7 @@
   </div>
 
   <button id="ai-btn" class="tb-btn" title="יצירת אינדיקטור ב-AI">✨ AI אינדיקטור</button>
+    <button id="ai-verify-btn" class="tb-btn" title="בדיקת הגרף עם AI">🤖 AI בדיקה</button>
 
   <button id="l2-btn" class="tb-btn hidden" title="עומק שוק — Level 2 (קריפטו)">📊 L2</button>
 
@@ -293,6 +296,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=20"></script>
+<script src="/static/app.js?v=20"></script><script src="/static/ai_verify.js?v=1"></script><script src="/static/scanner.js?v=1"></script><script src="/static/sandbox.js?v=1"></script><script src="/static/strategy.js?v=1"></script>
 </body>
 </html>
