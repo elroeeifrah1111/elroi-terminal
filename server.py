@@ -40,6 +40,27 @@ from markets import (
 from alerts_engine import AlertStore, SupabaseAlertStorage, recent_triggers
 import ai_engine
 
+# --- merged from trading-alerts: AI chart verification + scanner subsystem ---
+try:
+    from ai_verify import (
+        get_audit as ai_verify_audit,
+        log_verification as ai_verify_log,
+        verify_chart,
+    )
+    AI_VERIFY_AVAILABLE = True
+except Exception as _exc:  # missing dep must not kill the terminal
+    AI_VERIFY_AVAILABLE = False
+    ai_verify_audit = ai_verify_log = verify_chart = None
+    logging.getLogger("charts").warning("ai_verify unavailable: %s", _exc)
+
+try:
+    import scan_api
+    SCANNER_AVAILABLE = True
+except Exception as _exc:
+    SCANNER_AVAILABLE = False
+    scan_api = None
+    logging.getLogger("charts").warning("scan_api unavailable: %s", _exc)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("charts")
 
@@ -628,6 +649,76 @@ def api_ai_status():
 
 
 # ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
+# AI chart verification (merged from trading-alerts).
+# Free cascade: Gemini -> Z.AI -> Groq -> OpenRouter -> Pollinations.
+# POST JSON: {symbol, timeframe, entry_price, direction, image_b64}
+# ----------------------------------------------------------------------------
+@app.post("/api/ai/verify")
+def api_ai_verify(payload: dict):
+    if not AI_VERIFY_AVAILABLE:
+        return JSONResponse(status_code=503,
+                            content={"detail": "AI verification לא זמין כרגע"})
+    payload = payload or {}
+    symbol = str(payload.get("symbol") or "").strip().upper()
+    timeframe = str(payload.get("timeframe") or "").strip()
+    try:
+        entry_price = float(payload.get("entry_price"))
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400,
+                            content={"detail": "entry_price חסר או לא מספרי"})
+    direction = str(payload.get("direction") or "long").strip().lower()
+    if direction not in ("long", "short"):
+        return JSONResponse(status_code=400,
+                            content={"detail": "direction חייב להיות long או short"})
+    image_b64 = str(payload.get("image_b64") or "").strip()
+    if len(image_b64) < 1000:
+        return JSONResponse(status_code=400,
+                            content={"detail": "image_b64 חסר או לא תקין"})
+    try:
+        result = verify_chart(symbol=symbol, timeframe=timeframe,
+                              entry_price=entry_price, direction=direction,
+                              image_b64=image_b64)
+    except Exception as exc:
+        logger.exception("ai verify failed")
+        return JSONResponse(status_code=502,
+                            content={"detail": f"שגיאת AI: {exc}"})
+    try:
+        ai_verify_log({
+            "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol": symbol, "timeframe": timeframe,
+            "direction": direction, "entry_price": entry_price,
+            "verdict": result.get("verdict"),
+            "confidence": result.get("confidence"),
+            "provider": result.get("provider"),
+        })
+    except Exception:
+        pass
+    return result
+
+
+@app.get("/api/ai/verify/audit")
+def api_ai_verify_audit(limit: int = 20):
+    if not AI_VERIFY_AVAILABLE:
+        return JSONResponse(status_code=503,
+                            content={"detail": "AI verification לא זמין כרגע"})
+    return ai_verify_audit(limit=min(max(int(limit), 1), 50))
+
+
+# ----------------------------------------------------------------------------
+# Scanner subsystem (merged from trading-alerts): multi-symbol scans,
+# Pine/Python sandbox, backtests, strategies, saved + scheduled scans.
+# ----------------------------------------------------------------------------
+if SCANNER_AVAILABLE:
+    def _scan_candle_loader(symbol: str, period: str, interval: str) -> dict:
+        # scan_api speaks trading-alerts periods; map to this app's periods
+        p = {"5d": "5D", "1mo": "1M", "1y": "1Y", "max": "ALL"}.get(period, period)
+        return load_candles(symbol, p, interval)
+
+    scan_api.set_candle_loader(_scan_candle_loader)
+    app.include_router(scan_api.router)
+    scan_api.start_scan_runner()
 # Live crypto stream: WebSocket proxy -> Coinbase WS (free, no key)
 # ----------------------------------------------------------------------------
 @app.websocket("/ws/stream")
