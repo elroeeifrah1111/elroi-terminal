@@ -13,6 +13,7 @@ Free-tier design:
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -677,9 +678,17 @@ def api_ai_verify(payload: dict):
         return JSONResponse(status_code=400,
                             content={"detail": "image_b64 חסר או לא תקין"})
     try:
-        result = verify_chart(symbol=symbol, timeframe=timeframe,
-                              entry_price=entry_price, direction=direction,
-                              image_b64=image_b64)
+        image_bytes = base64.b64decode(image_b64, validate=True)
+    except Exception:
+        return JSONResponse(status_code=400,
+                            content={"detail": "image_b64 אינו base64 תקין"})
+    if len(image_bytes) > 6 * 1024 * 1024:
+        return JSONResponse(status_code=413,
+                            content={"detail": "התמונה גדולה מדי (מעל 6MB)"})
+    try:
+        # verify_chart(image_bytes, symbol, timeframe, entry_price, direction)
+        result = verify_chart(image_bytes, symbol, timeframe,
+                              entry_price, direction)
     except Exception as exc:
         logger.exception("ai verify failed")
         return JSONResponse(status_code=502,
@@ -689,13 +698,35 @@ def api_ai_verify(payload: dict):
             "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "symbol": symbol, "timeframe": timeframe,
             "direction": direction, "entry_price": entry_price,
+            "ok": result.get("ok"),
             "verdict": result.get("verdict"),
             "confidence": result.get("confidence"),
             "provider": result.get("provider"),
+            "model": result.get("model"),
         })
     except Exception:
         pass
+    if not result.get("ok"):
+        return JSONResponse(status_code=502, content={
+            "detail": "all AI providers failed",
+            "errors": result.get("errors"),
+            "tried": result.get("tried"),
+        })
     return result
+
+
+@app.get("/api/ai/verify/providers")
+def api_ai_verify_providers():
+    """Which AI providers are configured (key presence only, no secrets)."""
+    if not AI_VERIFY_AVAILABLE:
+        return JSONResponse(status_code=503,
+                            content={"detail": "AI verification לא זמין כרגע"})
+    try:
+        from ai_verify import status as ai_verify_status
+        return ai_verify_status()
+    except Exception as exc:
+        return JSONResponse(status_code=502,
+                            content={"detail": f"שגיאת AI: {exc}"})
 
 
 @app.get("/api/ai/verify/audit")
