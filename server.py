@@ -395,6 +395,17 @@ def _search_universe() -> List[dict]:
 
 _YAHOO_SEARCH_CACHE: Dict[str, tuple] = {}
 _YAHOO_SEARCH_UA = {"User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"}
+_YAHOO_SESSION = None
+
+
+def _yahoo_session():
+    """סשן משותף עם עוגיות — Yahoo מחזיר לעיתים 401 לבקשות מ-IP של דאטה־סנטר ללא עוגיות."""
+    global _YAHOO_SESSION
+    if _YAHOO_SESSION is None:
+        s = requests.Session()
+        s.headers.update(_YAHOO_SEARCH_UA)
+        _YAHOO_SESSION = s
+    return _YAHOO_SESSION
 
 
 def _yahoo_search(q: str):
@@ -405,20 +416,32 @@ def _yahoo_search(q: str):
         return ent[1]
     out = []
     try:
-        r = requests.get(
-            "https://query2.finance.yahoo.com/v1/finance/search",
-            params={"q": q, "quotesCount": 12, "newsCount": 0},
-            headers=_YAHOO_SEARCH_UA, timeout=10)
-        if r.ok:
-            for qt in r.json().get("quotes", [])[:12]:
-                sym = (qt.get("symbol") or "").upper()
-                if not sym:
+        s = _yahoo_session()
+        for host in ("query2.finance.yahoo.com", "query1.finance.yahoo.com"):
+            for attempt in range(2):
+                r = s.get(
+                    "https://" + host + "/v1/finance/search",
+                    params={"q": q, "quotesCount": 12, "newsCount": 0},
+                    timeout=10)
+                if r.status_code == 401 and attempt == 0:
+                    try:
+                        s.get("https://fc.yahoo.com", timeout=8)
+                    except Exception:
+                        pass
                     continue
-                qtype = (qt.get("quoteType") or "").upper()
-                mkt = "crypto" if qtype == "CRYPTOCURRENCY" else \
-                      "fx" if qtype == "CURRENCY" else "stock"
-                name = qt.get("shortname") or qt.get("longname") or sym
-                out.append({"symbol": sym, "name": name, "market": mkt})
+                if r.ok:
+                    for qt in r.json().get("quotes", [])[:12]:
+                        sym = (qt.get("symbol") or "").upper()
+                        if not sym:
+                            continue
+                        qtype = (qt.get("quoteType") or "").upper()
+                        mkt = "crypto" if qtype == "CRYPTOCURRENCY" else \
+                              "fx" if qtype == "CURRENCY" else "stock"
+                        name = qt.get("shortname") or qt.get("longname") or sym
+                        out.append({"symbol": sym, "name": name, "market": mkt})
+                break
+            if out:
+                break
     except Exception as exc:
         logger.debug("yahoo search failed for %s: %s", q, exc)
     _YAHOO_SEARCH_CACHE[q] = (now, out)
