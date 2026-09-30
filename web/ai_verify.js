@@ -132,8 +132,6 @@ function waitForChartSymbol(sym, timeoutMs) {
       box.textContent = "הזן מחיר כניסה מספרי";
       return;
     }
-    const sym = ($("aiv-symbol").value || "").trim().toUpperCase();
-    if (!sym) {
       box.className = "aiv-result aiv-err";
       box.textContent = "הזן סימול";
       return;
