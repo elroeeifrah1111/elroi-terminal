@@ -201,9 +201,13 @@ def _call_gemini(api_key, model, image_b64, mime, prompt):
     return norm, None
 
 
-def _call_pollinations(image_b64, mime, prompt):
-    # Keyless. POST /openai is OpenAI-compatible.
-    url = "https://text.pollinations.ai/openai"
+def _call_pollinations(api_key, image_b64, mime, prompt):
+    # v2 API: https://gen.pollinations.ai/v1/chat/completions (OpenAI-compatible).
+    # Optional POLLINATIONS_API_KEY (pk_/sk_ from enter.pollinations.ai);
+    # without a key the endpoint may reject the call - failure is non-fatal.
+    import os as _os
+    key = api_key or _os.environ.get("POLLINATIONS_API_KEY", "").strip()
+    url = "https://gen.pollinations.ai/v1/chat/completions"
     payload = {
         "model": "openai",
         "messages": [{
@@ -216,7 +220,10 @@ def _call_pollinations(image_b64, mime, prompt):
         }],
         "max_tokens": 900,
     }
-    status, body = _http_post(url, payload, {"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    status, body = _http_post(url, payload, headers)
     return _parse_openai_compat(status, body)
 
 
@@ -225,10 +232,10 @@ def _call_pollinations(image_b64, mime, prompt):
 def _provider_chain():
     return [
         ("gemini",
-         ["gemini-2.5-flash", "gemini-2.0-flash"],
+         ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.8-flash"],
          "GEMINI_API_KEY", _call_gemini),
         ("zai",
-         ["glm-4.6v-flash"],
+         ["glm-4.6v-flash", "glm-4.5v"],
          "ZAI_API_KEY",
          lambda key, model, b64, mime, prompt: _parse_openai_compat(*_openai_compat_call(
              "https://open.bigmodel.cn/api/paas/v4", key, model, b64, mime, prompt))),
@@ -244,10 +251,12 @@ def _provider_chain():
              "https://openrouter.ai/api/v1", key, model, b64, mime, prompt,
              extra_headers={"HTTP-Referer": "https://elroi-terminal.onrender.com",
                             "X-Title": "Elroi Terminal"}))),
+        # pollinations: env_key=None so it is always attempted; the v2 endpoint
+        # accepts an optional POLLINATIONS_API_KEY (read inside _call_pollinations).
         ("pollinations",
          ["openai"],
          None,
-         lambda _key, model, b64, mime, prompt: _call_pollinations(b64, mime, prompt)),
+         lambda key, model, b64, mime, prompt: _call_pollinations(key, b64, mime, prompt)),
     ]
 
 
