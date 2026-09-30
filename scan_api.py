@@ -609,6 +609,8 @@ class BacktestRequest(BaseModel):
     interval: str = "1d"
     strategy_id: str = "ema_cross"
     params: Optional[Dict[str, float]] = None
+    initial_capital: float = 10000.0
+    commission_pct: float = 0.1
 
 
 class OptimizeRequest(BaseModel):
