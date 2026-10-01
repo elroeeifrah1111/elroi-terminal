@@ -56,7 +56,7 @@ logger = logging.getLogger("scanner")
 
 BATCH_CHUNK = 100          # symbols per yf.download request (memory-safe on 512MB)
 DOWNLOAD_WORKERS = 2       # parallel chunk downloads (512MB instance)
-PER_SYMBOL_TIMEOUT = 15    # wall-clock seconds per symbol (child is killed after)
+PER_SYMBOL_TIMEOUT = 60    # wall-clock seconds per symbol (child is killed after)
 SCAN_WORKERS = 2           # concurrent sandbox child processes (512MB instance)
 SCAN_CHILD_MEM_HEADROOM = 768 * 1024 * 1024  # extra address space per child
 MAX_SYMBOLS_INTRADAY = 2000  # safety cap for intraday batch scans
