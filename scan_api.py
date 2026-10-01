@@ -6,11 +6,12 @@ single-symbol Pine/Python sandbox endpoints.
 
 Mount from server.py:
     import scan_api
-    scan_api.set_candle_loader(load_candles)   # fn(symbol, period, interval) -> {"candles": [...]}
+    scan_api.set_candle_loader(load_candles)   # fn(symbol, period, interval) -> {\"candles\": [...]}
     app.include_router(scan_api.router)
     scan_api.start_scan_runner()               # daemon thread, scheduled scans
 """
 
+import asyncio
 import gc
 import json
 import logging
@@ -22,6 +23,7 @@ import sqlite3
 import tempfile
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from io import StringIO
@@ -41,7 +43,6 @@ from scanner import (
     PY_BASEBO_INDICATOR_EXAMPLE,
     PY_BASEBO_SCAN_EXAMPLE,
     PY_STRATEGY_EXAMPLE,
-    MAX_SYMBOLS_INTRADAY,
     batch_load_candles,
     run_python_indicator,
     run_python_strategy,
@@ -55,13 +56,56 @@ from strategy_engine import (
     run_backtest,
 )
 
-
-MAX_SYMBOLS = 500
-
-
 logger = logging.getLogger("scan_api")
 
 router = APIRouter()
+
+# ----------------------------------------------------------------------------
+# Async scan jobs — POST /api/scan/run returns a job_id immediately and the
+# scan runs in the background; the UI polls GET /api/scan/job/{job_id} for
+# progress/results. There are NO symbol limits (user requirement): large
+# lists (e.g. 6654 symbols) are processed in chunks as background jobs.
+# ----------------------------------------------------------------------------
+_scan_jobs: Dict[str, Dict] = {}
+_SCAN_JOB_TTL = 3600  # seconds; finished jobs older than this are pruned
+
+
+def _prune_scan_jobs() -> None:
+    now = time.time()
+    expired = [jid for jid, j in _scan_jobs.items()
+               if now - j.get("created_at", now) > _SCAN_JOB_TTL]
+    for jid in expired:
+        _scan_jobs.pop(jid, None)
+
+
+def _scan_job_progress(job_id: str, done: int, total: int) -> None:
+    job = _scan_jobs.get(job_id)
+    if job is not None:
+        job["progress"] = round(done / total * 100, 1) if total else 100
+
+
+async def _scan_job_worker(job_id: str, symbols: List[str], interval: str,
+                           period: str, language: str, code: str) -> None:
+    """Background scan worker. The blocking scan runs in a thread
+    (asyncio.to_thread) so the event loop stays responsive; results or the
+    error are recorded on the job dict for polling clients."""
+    job = _scan_jobs.get(job_id)
+    if job is None:
+        return
+    try:
+        results = await asyncio.to_thread(
+            _run_scan_job, symbols, interval, period, language, code,
+            lambda done, total: _scan_job_progress(job_id, done, total))
+        job["results"] = results
+        job["progress"] = 100
+        job["status"] = "done"
+    except Exception as e:  # noqa: BLE001 — surfaced to the UI via polling
+        logger.exception("scan job %s failed", job_id)
+        job["status"] = "error"
+        job["error"] = str(e)
+    finally:
+        job["finished_at"] = time.time()
+
 
 # ----------------------------------------------------------------------------
 # Candle loader (injected by server.py to avoid a circular import)
@@ -536,16 +580,19 @@ def _malloc_trim() -> None:
 
 
 def _run_scan_job(symbols: List[str], interval: str, period: str,
-                  language: str, code: str) -> Dict:
+                  language: str, code: str, progress_cb=None) -> Dict:
     """Memory-safe: symbols are processed in chunks so we never hold millions
-    of candle dicts at once (512MB instance). Results are merged at the end."""
+    of candle dicts at once (512MB instance). Results are merged at the end.
+    progress_cb(done_chunks, total_chunks) is invoked after each chunk when
+    the scan runs as a background job."""
     t0 = time.time()
     intraday = interval not in ("1d", "1wk")
     chunk_size = 150 if intraday else 500
     all_results: List[Dict] = []
     missing: List[str] = []
     total_with_data = 0
-    for i in range(0, len(symbols), chunk_size):
+    total_chunks = max(1, (len(symbols) + chunk_size - 1) // chunk_size)
+    for chunk_idx, i in enumerate(range(0, len(symbols), chunk_size)):
         chunk = symbols[i:i + chunk_size]
         candles_by_symbol, chunk_missing = _scan_candles(chunk, period, interval)
         total_with_data += len(candles_by_symbol)
@@ -556,6 +603,8 @@ def _run_scan_job(symbols: List[str], interval: str, period: str,
         del candles_by_symbol, chunk_results, chunk
         gc.collect()
         _malloc_trim()
+        if progress_cb is not None:
+            progress_cb(chunk_idx + 1, total_chunks)
     matched = sorted([r for r in all_results if r.get("signal")],
                      key=lambda r: (-r.get("score", 0), r["symbol"]))
     rest = sorted([r for r in all_results if not r.get("signal")],
@@ -735,7 +784,7 @@ def api_optimize(req: OptimizeRequest):
 def api_pine_run(req: PineRunRequest):
     code = (req.code or "").strip()
     if not code:
-        raise HTTPException(status_code=400, detail="אין קוד להרצה")
+        raise HTTPException(status_code=400, detail="אין קוד סריקה")
     sym = _clean_symbol(req.symbol)
     data = _load_candles(sym, req.period, req.interval)
     try:
@@ -765,7 +814,7 @@ def _resolve_scan_symbols(source: Dict) -> List[str]:
 
 
 @router.post("/api/scan/run")
-def api_scan_run(req: ScanRunRequest):
+async def api_scan_run(req: ScanRunRequest):
     code = (req.code or "").strip()
     if not code:
         raise HTTPException(status_code=400, detail="אין קוד סריקה")
@@ -778,21 +827,37 @@ def api_scan_run(req: ScanRunRequest):
     symbols = [s for s in dict.fromkeys(symbols) if s]
     if not symbols:
         raise HTTPException(status_code=400, detail="הרשימה ריקה — אין מה לסרוק")
-    if len(symbols) > MAX_SYMBOLS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"רשימת הסמלים גדולה מדי ({len(symbols)}). מקסימום {MAX_SYMBOLS} סמלים לסריקה. בחר רשימה קטנה יותר או הזן סמלים מותאמים."
-        )
-    if interval not in ("1d", "1wk") and len(symbols) > MAX_SYMBOLS_INTRADAY:
-        raise HTTPException(
-            status_code=400,
-            detail=f"סריקת אינטרוול תוך-יומי מוגבלת ל-{MAX_SYMBOLS_INTRADAY} סימולים (נבחרו {len(symbols)})",
-        )
-    try:
-        return _run_scan_job(symbols, interval, period, language, code)
-    except Exception as e:
-        logger.exception("scan failed")
-        raise HTTPException(status_code=500, detail=f"הסריקה נכשלה: {e}")
+    # No symbol limits (user requirement) — large scans run as background jobs.
+    _prune_scan_jobs()
+    job_id = str(uuid.uuid4())
+    _scan_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "running",
+        "progress": 0,
+        "results": None,
+        "error": None,
+        "created_at": time.time(),
+        "symbol_count": len(symbols),
+    }
+    # Fire and forget — the worker records results/progress on the job dict.
+    asyncio.create_task(
+        _scan_job_worker(job_id, symbols, interval, period, language, code))
+    return {"job_id": job_id, "status": "running"}
+
+
+@router.get("/api/scan/job/{job_id}")
+async def api_scan_job(job_id: str):
+    job = _scan_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "progress": job["progress"],
+        "results": job["results"],
+        "error": job["error"],
+        "symbol_count": job.get("symbol_count", 0),
+    }
 
 
 @router.get("/api/scan/meta")
@@ -806,7 +871,6 @@ def api_scan_meta():
         "py_srflip_scan_example": PY_SRFLIP_SCAN_EXAMPLE,
         "py_basebo_indicator_example": PY_BASEBO_INDICATOR_EXAMPLE,
         "py_basebo_scan_example": PY_BASEBO_SCAN_EXAMPLE,
-        "max_symbols_intraday": MAX_SYMBOLS_INTRADAY,
         "intervals": list(SCAN_INTERVAL_PERIOD.keys()),
     }
 
@@ -938,10 +1002,7 @@ def _execute_scheduled_scan(s: Dict) -> None:
             logger.warning("scheduled scan #%d: empty symbol list", s["id"])
             db_scan_touch(s["id"], [])
             return
-        if s["interval"] not in ("1d", "1wk") and len(symbols) > MAX_SYMBOLS_INTRADAY:
-            logger.warning("scheduled scan #%d: too many symbols for intraday (%d)",
-                           s["id"], len(symbols))
-            return
+        # No symbol limits (user requirement).
         out = _run_scan_job(symbols, s["interval"], s["period"],
                             s["language"], s["code"])
     except Exception:
