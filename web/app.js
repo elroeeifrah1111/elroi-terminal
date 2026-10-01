@@ -269,11 +269,17 @@ function setTfInterval(iv) {
       x.classList.toggle("active", x.dataset.range === currentPeriod));
     showToast(`טווח הותאם ל־${maxR} לאינטרוול ${iv}`);
   }
-  loadChart();
+  
 }
 
 async function loadChart() {
-  if (!chart) return; // ספריית הגרפים לא נטענה — הבאנר כבר מוצג
+  if (!chart) {
+         // הספרייה עוד בטעינה (שיקום דינמי איטי במובייל) — מחכים לה במקום לוותר בשקט
+         $("tb-symbol").textContent = currentSymbol;
+         $("tb-price").textContent = "טוען...";
+         const ready = await waitForChart(20000);
+         if (!ready || !chart) { showChartLibError(new Error("chart-lib-timeout")); return; }
+  }
   $("chart-error").classList.add("hidden");
   $("tb-symbol").textContent = currentSymbol;
   $("tb-price").textContent = "טוען...";
@@ -316,9 +322,20 @@ async function loadChart() {
     if (baseCandles.length >= 2) prevClose = baseCandles[baseCandles.length - 2].close;
     updateTopbar(px);
     updateBadge();
+         chartLoadedOnce = true;
+         loadChart._retries = 0;
     startLiveIfCrypto();
   } catch (e) {
     const timedOut = e && e.name === "AbortError";
+         // ניסיון אוטומטי בטעינה הראשונה (cold start של השרת החינמי) — עד 3 ניסיונות
+         loadChart._retries = (loadChart._retries || 0) + 1;
+         if (!chartLoadedOnce && loadChart._retries <= 3) {
+                  $("tb-price").textContent = "טוען...";
+                  showToast("⏳ השרת מתעורר — מנסה שוב (" + loadChart._retries + "/3)");
+                  await new Promise(r => setTimeout(r, 4000));
+                  return loadChart();
+         }
+         loadChart._retries = 0;
     showToast(timedOut ? "⏳ השרת לא מגיב — נסה שוב" : "שגיאה: " + e.message);
     $("tb-price").textContent = "—";
     $("chart-error").classList.remove("hidden");
