@@ -941,7 +941,7 @@ def run_python_strategy(code: str, candles: List[Dict], symbol: str = "",
 PYTHON_EXAMPLE = '''# דוגמת סריקה: RSI נמוך + מחיר מעל SMA50
 # df: נרות (time/open/high/low/close/volume) · ta: אינדיקטורים · SYMBOL · INTERVAL
 def scan(df):
-    c = df["close"]
+    c = df["Close"]
     rsi = ta.rsi(c, 14).iloc[-1]
     sma50 = ta.sma(c, 50).iloc[-1]
     price = c.iloc[-1]
@@ -958,7 +958,7 @@ PINE_SCAN_NOTE = ("Pine: סימול נחשב תואם אם הסקריפט ירה
 PY_INDICATOR_EXAMPLE = '''# אינדיקטור Python לגרף — מחזיר dict של {שם_קו: סדרה}
 # df: נרות · ta: אינדיקטורים · pd/np · SYMBOL · INTERVAL
 def indicator(df):
-    c = df["close"]
+    c = df["Close"]
     upper, mid, lower = ta.bbands(c, 20, 2.0)
     return {
         "BB Upper": upper,
@@ -971,7 +971,7 @@ def indicator(df):
 PY_STRATEGY_EXAMPLE = '''# אסטרטגיית Python לבקטסט — מחזיר סדרת סיגנלים:
 #  1 = כניסה ללונג, -1 = יציאה, 0 = החזקה
 def strategy(df):
-    c = df["close"]
+    c = df["Close"]
     fast = ta.ema(c, 9)
     slow = ta.ema(c, 21)
     rsi = ta.rsi(c, 14)
@@ -1078,20 +1078,20 @@ def indicator(df):
     import numpy as np
 
     n = len(df)
-    close = df["close"].to_numpy(dtype=float)
-    high  = df["high"].to_numpy(dtype=float)
-    low   = df["low"].to_numpy(dtype=float)
+    close = df["Close"].to_numpy(dtype=float)
+    high  = df["High"].to_numpy(dtype=float)
+    low   = df["Low"].to_numpy(dtype=float)
 
     # ---- סדרות מחושבות מראש (וקטורי) ----
-    atr_s    = ta.atr(df["high"], df["low"], df["close"], ATR_LEN).to_numpy(dtype=float)
-    trend    = ta.ema(df["close"], TREND_LEN)
+    atr_s    = ta.atr(df["High"], df["Low"], df["Close"], ATR_LEN).to_numpy(dtype=float)
+    trend    = ta.ema(df["Close"], TREND_LEN)
     falling  = (trend < trend.shift(TREND_LEN)).to_numpy()  # כמו ta.falling(trend, TREND_LEN)
     falling  = np.nan_to_num(falling.astype(float), nan=0.0).astype(bool)
-    smoothed = ta.sma(df["close"], SMOOTH_LEN).to_numpy(dtype=float)
-    wmin_a   = ta.lowest(ta.sma(df["close"], SMOOTH_LEN), ROUND_WINDOW).to_numpy(dtype=float)
-    wmax_a   = ta.highest(ta.sma(df["close"], SMOOTH_LEN), ROUND_WINDOW).to_numpy(dtype=float)
-    prior_high = ta.highest(df["high"], PRIOR_DROP_LOOKBACK).to_numpy(dtype=float)
-    pat_low    = ta.lowest(df["low"], ROUND_WINDOW).to_numpy(dtype=float)
+    smoothed = ta.sma(df["Close"], SMOOTH_LEN).to_numpy(dtype=float)
+    wmin_a   = ta.lowest(ta.sma(df["Close"], SMOOTH_LEN), ROUND_WINDOW).to_numpy(dtype=float)
+    wmax_a   = ta.highest(ta.sma(df["Close"], SMOOTH_LEN), ROUND_WINDOW).to_numpy(dtype=float)
+    prior_high = ta.highest(df["High"], PRIOR_DROP_LOOKBACK).to_numpy(dtype=float)
+    pat_low    = ta.lowest(df["Low"], ROUND_WINDOW).to_numpy(dtype=float)
 
     ph, pl     = _pivot_series(high, low, PIVOT_LEN, PIVOT_LEN)      # לאזורי S/R
     cph, cpl   = _pivot_series(high, low, C_PIVOT_LEN, C_PIVOT_LEN)  # ל-Cup & Handle
@@ -1429,28 +1429,28 @@ def indicator(df):
     import numpy as np
 
     n = len(df)
-    op    = df["open"].to_numpy(dtype=float)
-    high  = df["high"].to_numpy(dtype=float)
-    low   = df["low"].to_numpy(dtype=float)
-    close = df["close"].to_numpy(dtype=float)
-    vol   = (df["volume"].to_numpy(dtype=float)
-             if "volume" in df.columns else np.full(n, np.nan))
+    op    = df["Open"].to_numpy(dtype=float)
+    high  = df["High"].to_numpy(dtype=float)
+    low   = df["Low"].to_numpy(dtype=float)
+    close = df["Close"].to_numpy(dtype=float)
+    vol   = (df["Volume"].to_numpy(dtype=float)
+             if "Volume" in df.columns else np.full(n, np.nan))
 
-    atr_s    = ta.atr(df["high"], df["low"], df["close"], ATR_LEN).to_numpy(dtype=float)
-    trend    = ta.ema(df["close"], TREND_LEN)
+    atr_s    = ta.atr(df["High"], df["Low"], df["Close"], ATR_LEN).to_numpy(dtype=float)
+    trend    = ta.ema(df["Close"], TREND_LEN)
     falling  = (trend < trend.shift(TREND_LEN)).to_numpy()
     falling  = np.nan_to_num(falling.astype(float), nan=0.0).astype(bool)
     _sm, _wmin, _wmax, _patlow, _smsz = {}, {}, {}, {}, {}
     for _W in ROUND_WINDOWS:
         _sz = max(5, _W // 6)
         _smsz[_W] = _sz
-        _s = ta.sma(df["close"], _sz).to_numpy(dtype=float)
+        _s = ta.sma(df["Close"], _sz).to_numpy(dtype=float)
         _sm[_W] = _s
         _wmin[_W] = ta.lowest(_s, _W).to_numpy(dtype=float)
         _wmax[_W] = ta.highest(_s, _W).to_numpy(dtype=float)
-        _patlow[_W] = ta.lowest(df["low"], _W).to_numpy(dtype=float)
+        _patlow[_W] = ta.lowest(df["Low"], _W).to_numpy(dtype=float)
     _RW_DESC = tuple(sorted(ROUND_WINDOWS, reverse=True))
-    prior_high = ta.highest(df["high"], PRIOR_DROP_LOOKBACK).to_numpy(dtype=float)
+    prior_high = ta.highest(df["High"], PRIOR_DROP_LOOKBACK).to_numpy(dtype=float)
 
     ph, pl   = _pivot_series(high, low, PIVOT_LEN, PIVOT_LEN)
     cph, cpl = _pivot_series(high, low, C_PIVOT_LEN, C_PIVOT_LEN)
