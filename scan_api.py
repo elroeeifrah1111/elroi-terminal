@@ -55,6 +55,10 @@ from strategy_engine import (
     run_backtest,
 )
 
+
+MAX_SYMBOLS = 500
+
+
 logger = logging.getLogger("scan_api")
 
 router = APIRouter()
@@ -774,6 +778,11 @@ def api_scan_run(req: ScanRunRequest):
     symbols = [s for s in dict.fromkeys(symbols) if s]
     if not symbols:
         raise HTTPException(status_code=400, detail="הרשימה ריקה — אין מה לסרוק")
+    if len(symbols) > MAX_SYMBOLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"רשימת הסמלים גדולה מדי ({len(symbols)}). מקסימום {MAX_SYMBOLS} סמלים לסריקה. בחר רשימה קטנה יותר או הזן סמלים מותאמים."
+        )
     if interval not in ("1d", "1wk") and len(symbols) > MAX_SYMBOLS_INTRADAY:
         raise HTTPException(
             status_code=400,
