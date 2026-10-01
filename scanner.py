@@ -3,7 +3,7 @@ Scanner engine — run an indicator/strategy scan over a whole ticker list.
 
 Two script languages:
   * python — user code gets a pandas DataFrame `df` (columns:
-    time,open,high,low,close,volume), a vectorized indicator library `ta`,
+    time,Open,High,Low,Close,Volume), a vectorized indicator library `ta`,
     plus `pd`, `np`, `SYMBOL`, `INTERVAL`. The script either defines
         def scan(df): ... -> {"signal": bool, "score": float, "note": str}
     or sets a top-level `result = {...}` dict.
@@ -169,8 +169,8 @@ class TA:
 
     @staticmethod
     def vwap(df: pd.DataFrame) -> pd.Series:
-        tp = (df["high"] + df["low"] + df["close"]) / 3
-        v = df["volume"].replace(0, np.nan)
+        tp = (df["High"] + df["Low"] + df["Close"]) / 3
+        v = df["Volume"].replace(0, np.nan)
         return (tp * v).cumsum() / v.cumsum()
 
     @staticmethod
@@ -300,8 +300,8 @@ def batch_load_candles(symbols: List[str], period: str = "1y",
 
 
 def candles_to_df(candles: List[Dict]) -> pd.DataFrame:
-    df = pd.DataFrame(candles)
-    for col in ("open", "high", "low", "close", "volume"):
+    df = pd.DataFrame(candles).rename(columns={"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"})
+    for col in ("Open", "High", "Low", "Close", "Volume"):
         if col not in df.columns:
             df[col] = 0.0
         df[col] = pd.to_numeric(df[col], errors="coerce")
