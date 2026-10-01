@@ -132,8 +132,7 @@ function waitForChartSymbol(sym, timeoutMs) {
       box.textContent = "הזן מחיר כניסה מספרי";
       return;
     }
-      box.className = "aiv-result aiv-err";
-      box.textContent = "הזן סימול";
+      if (0) { box.textContent = "הזן סימול";
       return;
     }
     const sym = ($("aiv-symbol").value || "").trim().toUpperCase(); if (!sym) { box.textContent = "הזן סימול"; return; } if (typeof pickSymbol === "function" && sym !== currentSym()) { btn.disabled = true; try { pickSymbol(sym); } catch (e) {} const loaded = await waitForChartSymbol(sym, 30000); btn.disabled = false; if (!loaded) { box.textContent = "הגרף לא נטען"; return; } const b64 = captureChartB64(); if (!b64) { box.textContent = "לא הצלחתי לצלם"; return; } $("aiv-img").src = "data:image/jpeg;base64," + b64; $("aiv-img").dataset.b64 = b64; $("aiv-tf").value = currentTimeframe(); } if (typeof pickSymbol === "function" && sym !== currentSym()) { btn.disabled = true; try { pickSymbol(sym); } catch (e) {} const loaded = await waitForChartSymbol(sym, 30000); btn.disabled = false; if (!loaded) { box.textContent = "הגרף לא נטען"; return; } const b64 = captureChartB64(); if (!b64) { box.textContent = "לא הצלחתי לצלם"; return; } $("aiv-img").src = "data:image/jpeg;base64," + b64; $("aiv-img").dataset.b64 = b64; $("aiv-tf").value = currentTimeframe(); }    const payload = {
