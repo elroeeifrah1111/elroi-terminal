@@ -525,6 +525,54 @@ class AlertStore:
     def list(self) -> List[dict]:
         return sorted(self.alerts, key=lambda a: a["created_at"], reverse=True)
 
+    # ---- bulk / group operations (watchlist alerts) ----
+    def create_bulk(self, symbols: List[str], alert_data: dict) -> dict:
+        """Create one alert per symbol, skipping duplicates. Returns summary dict."""
+        gid = f"grp_{int(time.time() * 1000)}"
+        created = 0
+        skipped: List[str] = []
+        cond = alert_data.get("condition") or {}
+        err = self.validate_condition(cond)
+        if err:
+            raise ValueError(err)
+        for raw_sym in symbols or []:
+            sym = str(raw_sym or "").strip().upper()
+            if not sym:
+                continue
+            dup = any(a.get("symbol") == sym and a.get("active")
+                      and a.get("condition") == cond for a in self.alerts)
+            if dup:
+                skipped.append(sym)
+                continue
+            data = dict(alert_data)
+            data["symbol"] = sym
+            data["group_id"] = gid
+            data["group_name"] = alert_data.get("group_name", "")
+            self.create(data)
+            created += 1
+        self._persist()
+        return {"created": created, "skipped": skipped, "group_id": gid}
+
+    def update_group(self, group_id: str, data: dict) -> int:
+        n = 0
+        for a in self.alerts:
+            if a.get("group_id") == group_id:
+                for k in ("active", "name", "frequency", "expires_at"):
+                    if k in data:
+                        a[k] = data[k]
+                n += 1
+        if n:
+            self._persist()
+        return n
+
+    def delete_group(self, group_id: str) -> int:
+        n = len(self.alerts)
+        self.alerts = [a for a in self.alerts if a.get("group_id") != group_id]
+        deleted = n - len(self.alerts)
+        if deleted:
+            self._persist()
+        return deleted
+
     # ---- evaluation ----
     def evaluate_all(self, fetch_candles: Callable) -> List[dict]:
         """Run one pass over active alerts. Returns triggered alerts."""
