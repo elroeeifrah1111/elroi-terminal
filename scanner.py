@@ -792,7 +792,9 @@ def _run_isolated(code: str, items: List[Tuple[str, List[Dict]]], language: str,
     never executes user code.
     """
     try:
-        ctx = multiprocessing.get_context("fork")
+                # forkserver: workers are forked from a clean single-threaded server
+             # process — safe when the caller is a FastAPI threadpool thread.
+     ctx = multiprocessing.get_context("forkserver")
     except (ValueError, AttributeError) as e:
         raise RuntimeError("הרצת סריקות דורשת סביבת Linux") from e
     total = len(items)
