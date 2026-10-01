@@ -449,7 +449,8 @@ _BULK_CHILD_TIMEOUT = 60  # seconds; then fall back to per-symbol
 def _bulk_candles_isolated(symbols: List[str], period: str,
                            interval: str) -> Dict[str, List[Dict]]:
     try:
-        ctx = multiprocessing.get_context("fork")
+                # forkserver: see scanner.py — safe fork from threaded server process.
+        ctx = multiprocessing.get_context("forkserver")
     except (ValueError, AttributeError):
         return {}
     fd, result_path = tempfile.mkstemp(prefix="bulk_scan_")
