@@ -584,11 +584,7 @@ def api_alerts_create(request: Request, payload: dict):
         return JSONResponse(status_code=400, content={"error": str(exc)})
 
 
-    try:
-    try:
-    try:
-    try:
-      @app.post("/api/alerts/bulk")
+@app.post("/api/alerts/bulk")
 def api_alerts_bulk_create(request: Request, payload: dict):
     """Watchlist alert: one alert per symbol, with duplicate prevention."""
     try:
