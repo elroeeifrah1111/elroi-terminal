@@ -548,7 +548,7 @@ class AlertStore:
             data["symbol"] = sym
             data["group_id"] = gid
             data["group_name"] = alert_data.get("group_name", "")
-            self.create(data)
+            na = self.create(data); na["group_id"] = gid
             created += 1
         self._persist()
         return {"created": created, "skipped": skipped, "group_id": gid}
