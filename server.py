@@ -38,7 +38,7 @@ from markets import (
     market_lists,
     normalize_symbol,
 )
-from alerts_engine import AlertStore, SupabaseAlertStorage, recent_triggers
+from alerts_engine import AlertStore, SupabaseAlertStorage, recent_triggers, send_telegram
 import ai_engine
 
 # --- merged from trading-alerts: AI chart verification + scanner subsystem ---
@@ -579,12 +579,16 @@ def api_alerts_list(request: Request):
 @app.post("/api/alerts")
 def api_alerts_create(request: Request, payload: dict):
     try:
-        return store_for(get_user_id(request)).create(payload or {})
+        alert = store_for(get_user_id(request)).create(payload or {}); send_telegram("\U0001F514" + str((alert or {}).get("symbol"))); return alert
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
 
 
-@app.post("/api/alerts/bulk")
+    try:
+    try:
+    try:
+    try:
+      @app.post("/api/alerts/bulk")
 def api_alerts_bulk_create(request: Request, payload: dict):
     """Watchlist alert: one alert per symbol, with duplicate prevention."""
     try:
@@ -593,7 +597,7 @@ def api_alerts_bulk_create(request: Request, payload: dict):
             return JSONResponse(status_code=400, content={"error": "חסרת רשימת סמלים"})
         if len(symbols) > 300:
             return JSONResponse(status_code=400, content={"error": "עד 300 סמלים"})
-        res = store_for(get_user_id(request)).create_bulk(symbols, payload.get("alert") or {})
+        res = store_for(get_user_id(request)).create_bulk(symbols, payload.get("alert") or {}); send_telegram("\U0001F514"+str(res.get("created")))
         return res
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
