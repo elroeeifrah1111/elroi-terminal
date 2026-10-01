@@ -159,33 +159,49 @@
     const symCount = scanSymbolCount(); /* Fix: warn before scanning large symbol lists (default "All US" = 6654). */ if (symCount != null && symCount > 100 && !confirm("הסריקה תכלול " + symCount + " סמלים ועשויה לקחת זמן רב. להמשיך?")) return; const btn = $("scan-run-btn");
     btn.disabled = true;
     btn.textContent = "⏳ סורק…";
-    $("scan-summary").textContent = "טוען נתונים ומריץ… (" + (symCount != null ? symCount + " סימולים · " : "") + "רשימות גדולות לוקחות דקה-שתיים)";
+    $("scan-summary").textContent = "סורק… 0%" + (symCount != null ? " (" + symCount + " סימולים)" : "");
     $("scan-results").innerHTML = "";
     $("scan-nav").classList.add("hidden");
-    let data = null, lastErr = null;
-    for (let attempt = 0; attempt < 2 && !data; attempt++) {
-      if (attempt > 0) {
-        $("scan-summary").textContent = "החיבור נקטע, מנסה שוב…";
-        await new Promise(r => setTimeout(r, 3000));
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    try {
+      // 1. Start the scan — the server returns immediately with a job_id.
+      const startRes = await fetch("/api/scan/run", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: scanSourceObj(),
+          interval: $("scan-interval").value,
+          language: $("scan-lang").value,
+          code: code,
+        }),
+      });
+      const started = await startRes.json();
+      if (!startRes.ok) throw new Error(started.detail || "שגיאה בסריקה");
+      const jobId = started.job_id;
+      if (!jobId) throw new Error("שגיאה בסריקה");
+      // 2. Poll the job every 2s until it finishes or fails.
+      let job = null, fails = 0;
+      for (;;) {
+        await sleep(2000);
+        try {
+          const pr = await fetch("/api/scan/job/" + encodeURIComponent(jobId));
+          job = await pr.json();
+          if (!pr.ok) throw new Error(job.detail || "שגיאה בסריקה");
+        } catch (e) {
+          if (++fails > 5) throw e;
+          $("scan-summary").textContent = "החיבור נקטע, מנסה שוב…";
+          continue;
+        }
+        fails = 0;
+        if (job.status === "done" || job.status === "error") break;
+        const pct = Math.round(job.progress || 0);
+        $("scan-summary").textContent = "סורק… " + pct + "%" +
+          (job.symbol_count ? " (" + job.symbol_count + " סימולים)" : "");
+        btn.textContent = "⏳ סורק… " + pct + "%";
       }
-      try {
-        const res = await fetch("/api/scan/run", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            source: scanSourceObj(),
-            interval: $("scan-interval").value,
-            language: $("scan-lang").value,
-            code: code,
-          }),
-        });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j.detail || "שגיאה בסריקה");
-        data = j;
-      } catch (e) { lastErr = e; }
-    }
-    if (data) renderScanResults(data);
-    else {
-      $("scan-summary").textContent = "שגיאה: " + (lastErr && lastErr.message);
+      if (job.status === "error") throw new Error(job.error || "הסריקה נכשלה");
+      renderScanResults(job.results);
+    } catch (e) {
+      $("scan-summary").textContent = "שגיאה: " + (e && e.message);
       showToast("הסריקה נכשלה");
     }
     btn.disabled = false;
