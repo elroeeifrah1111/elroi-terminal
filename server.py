@@ -12,6 +12,15 @@ Free-tier design:
   working locally exactly as before.
 """
 
+# --- fork safety: must execute before numpy/pandas are imported anywhere ---
+# The scan sandbox forks child processes from this threaded server process.
+# OpenBLAS/OpenMP thread pools do not survive fork() and can segfault the child.
+# Forcing single-threaded native libraries at startup makes fork safe.
+import os as _fork_os
+for _fork_k in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
+                "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    _fork_os.environ.setdefault(_fork_k, "1")
+
 import asyncio
 import base64
 import json
