@@ -18,6 +18,19 @@ var currentSource = "";
 
 var drawingMode = "cursor";
 var pendingPoint = null;
+// ניהול המתנה לספריית הגרפים: loadChart מחכה לה במקום לוותר בשקט כשהיא עוד בטעינה
+let notifyChartReady = null;
+const chartReady = new Promise(res => { notifyChartReady = res; });
+function signalChartReady() { if (notifyChartReady) { notifyChartReady(); notifyChartReady = null; } }
+function waitForChart(ms) {
+  if (chart) return Promise.resolve(true);
+  return Promise.race([
+    chartReady.then(() => !!chart),
+    new Promise(res => setTimeout(() => res(!!chart), ms || 20000))
+  ]);
+}
+var chartLoadedOnce = false;
+
 /* תצוגה מקדימה של ציור — שכבת SVG מעל הגרף (בלי סדרות בספרייה).
    הסיבה: יצירת LineSeries עם נקודה בודדת בלחיצה הראשונה הקפיאה את הטאב
    עד מוות (לולאת main-thread בספריית הגרפים, ללא exception). ה-SVG בטוח לחלוטין. */
@@ -1336,7 +1349,7 @@ async function doSearch(q) {
 function pickSymbol(sym) {
   closeSearch();
   currentSymbol = sym.toUpperCase();
-  restoreDrawings();
+  try { restoreDrawings(); } catch (e) { console.error("restoreDrawings failed", e); }
   loadChart();
   updateL2Btn();
   if (l2Open) loadL2();
@@ -1689,7 +1702,7 @@ function applyLayout(name) {
   } catch (e) {}
   // ציורים ישוחזרו אחרי טעינת הנתונים
   window._pendingLayoutDrawings = L.drawings || [];
-  restoreDrawings();
+  try { restoreDrawings(); } catch (e) { console.error("restoreDrawings failed", e); }
   loadChart().then(() => {
     if (window._pendingLayoutDrawings && window._pendingLayoutDrawings.length) {
       drawings = window._pendingLayoutDrawings.map(d => ({ ...d, id: uid("dw"), locked: !!d.locked }));
@@ -2021,7 +2034,7 @@ async function pullAndMerge() {
       touched = true;
     }
   });
-  if (touched) { restoreDrawings(); renderDrawings(); renderObjList(); }
+  if (touched) { try { restoreDrawings(); } catch (e) { console.error("restoreDrawings failed", e); } renderDrawings(); renderObjList(); }
 
   const srvLayouts = {};
   (d.layouts || []).forEach(row => { if (row.name && newer(row)) srvLayouts[row.name] = row.layout || {}; });
@@ -2216,7 +2229,7 @@ async function initChartWithRecovery() {
     // ניסיון שיקום: טעינה דינמית ואז אתחול מחדש
     const ok = await loadChartLibDynamic();
     if (ok) {
-      try { initChart(); loadChart(); return; }
+      try { initChart(); signalChartReady(); loadChart(); return; }
       catch (e2) { showChartLibError(e2); return; }
     }
     showChartLibError(firstErr);
@@ -2452,7 +2465,7 @@ function boot() {
   initSupabase();
 
   loadAlerts();
-  restoreDrawings();
+  try { restoreDrawings(); } catch (e) { console.error("restoreDrawings failed", e); }
   loadChart();
   refreshWatchlist();
   updateL2Btn();
