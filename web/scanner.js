@@ -101,7 +101,7 @@
     try {
       const lists = await fetch("/api/ticker-lists").then(r => r.json());
       sel.innerHTML = (lists || []).map(l =>
-        `<option value="preset:${esc(l.id)}">${esc(l.label_he || l.label)} (${l.count})</option>`).join("") +
+        `<option value="preset:${esc(l.id)}" data-count="${l.count}">${esc(l.label_he || l.label)} (${l.count})</option>`).join("") +
         '<option value="custom:">✏️ סימולים מותאמים</option>';
     } catch (e) {
       sel.innerHTML = '<option value="preset:sp500">S&P 500</option><option value="custom:">✏️ סימולים מותאמים</option>';
@@ -115,7 +115,7 @@
     return { type: "preset", id: v.slice(1).join(":") };
   }
 
-  /* ---------------- examples ---------------- */
+  /* Symbol count for the currently selected scan source; used to warn before running very large scans. Returns null when unknown. */ function scanSymbolCount() { const sel = $("scan-source"); const v = (sel.value || "preset:sp500").split(":"); if (v[0] === "custom") return (($("scan-custom").value || "").split(/[\s,;]+/).filter(Boolean)).length; const opt = sel.selectedOptions && sel.selectedOptions[0]; const n = opt && opt.dataset ? parseInt(opt.dataset.count, 10) : NaN; return isNaN(n) ? null : n; } /* ---------------- examples ---------------- */
   async function ensureMeta() {
     if (!scanMeta) {
       try { scanMeta = await fetch("/api/scan/meta").then(r => r.json()); } catch (e) {}
@@ -155,11 +155,11 @@
   /* ---------------- run ---------------- */
   async function runScan() {
     const code = $("scan-code").value.trim();
-    if (!code) { showToast("כתוב קוד סריקה קודם"); return; }
-    const btn = $("scan-run-btn");
+    if (!code) { /* Fix: empty-code validation — show a clear error in the scan results area and don't send the request. */ $("scan-summary").textContent = "⚠️ קוד הסריקה ריק — הזן קוד Python או Pine ולחץ שוב על ▶ הרץ סריקה."; $("scan-results").innerHTML = ""; showToast("נא להזין קוד סריקה"); return; }
+    const symCount = scanSymbolCount(); /* Fix: warn before scanning large symbol lists (default "All US" = 6654). */ if (symCount != null && symCount > 100 && !confirm("הסריקה תכלול " + symCount + " סמלים ועשויה לקחת זמן רב. להמשיך?")) return; const btn = $("scan-run-btn");
     btn.disabled = true;
     btn.textContent = "⏳ סורק…";
-    $("scan-summary").textContent = "טוען נתונים ומריץ… (רשימות גדולות לוקחות דקה-שתיים)";
+    $("scan-summary").textContent = "טוען נתונים ומריץ… (" + (symCount != null ? symCount + " סימולים · " : "") + "רשימות גדולות לוקחות דקה-שתיים)";
     $("scan-results").innerHTML = "";
     $("scan-nav").classList.add("hidden");
     let data = null, lastErr = null;
