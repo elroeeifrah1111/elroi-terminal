@@ -2239,6 +2239,7 @@ function loadChartLibDynamic() {
 async function initChartWithRecovery() {
   try {
     initChart();
+    signalChartReady();
     return;
   } catch (firstErr) {
     // הספרייה קיימת אבל האתחול נכשל — מציגים את השגיאה האמיתית
