@@ -784,7 +784,7 @@ def api_optimize(req: OptimizeRequest):
 def api_pine_run(req: PineRunRequest):
     code = (req.code or "").strip()
     if not code:
-        raise HTTPException(status_code=400, detail="אין קוד סריקה")
+        raise HTTPException(status_code=400, detail="אין קוד להרצה")
     sym = _clean_symbol(req.symbol)
     data = _load_candles(sym, req.period, req.interval)
     try:
