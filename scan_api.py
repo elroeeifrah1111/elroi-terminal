@@ -24,6 +24,7 @@ import tempfile
 import threading
 import time
 import uuid
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from io import StringIO
@@ -841,29 +842,61 @@ def _bulk_candles_isolated(symbols: List[str], period: str,
             pass
 
 
+_BULK_SUBBATCH = 100        # symbols per isolated bulk-download child
+_FALLBACK_WORKERS = 8       # per-symbol loader threads inside one chunk
+_FALLBACK_BUDGET = 240      # seconds per chunk for the fallback phase
+
+
 def _scan_candles(symbols: List[str], period: str,
                   interval: str) -> Tuple[Dict[str, List[Dict]], List[str]]:
-    """Bulk candles (isolated child) + reliable per-symbol fallback for misses.
-    Memory guard: the fallback runs INSIDE the parent, so it is only used for
-    a small number of missing symbols."""
-    candles = _bulk_candles_isolated(symbols, period, interval)
+    """Bulk candles (isolated child) + reliable per-symbol fallback.
+
+    The bulk child is capped at 60s for the WHOLE batch it is given, and
+    Yahoo bulk downloads from this instance's IP are slow/throttled at
+    scale - a single 500-symbol call returned nothing at all (verified
+    live: a 200-symbol chunk scanned 0). So the bulk attempt runs in
+    sub-batches of _BULK_SUBBATCH symbols (one 60s child each - a slow
+    sub-batch loses only its own symbols), and every symbol the bulk
+    missed goes through the per-symbol loader (the same loader the
+    charts use) in a thread pool. The caller's chunking already bounds
+    memory, so the historical 25-symbol fallback cap is gone; a time
+    budget keeps one chunk's fallback from stalling the job."""
+    candles: Dict[str, List[Dict]] = {}
+    for i in range(0, len(symbols), _BULK_SUBBATCH):
+        part = _bulk_candles_isolated(symbols[i:i + _BULK_SUBBATCH],
+                                      period, interval)
+        if part:
+            candles.update(part)
     missing = [s for s in symbols if s not in candles]
-    if missing and len(missing) <= 25:
+    if missing:
         def _one(sym: str):
             try:
                 d = _load_candles(sym, period, interval)
                 return sym, d.get("candles") or []
             except Exception:
                 return sym, []
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            for sym, cl in ex.map(_one, missing):
-                if cl:
-                    candles[sym] = cl
+
+        deadline = time.time() + _FALLBACK_BUDGET
+        ex = ThreadPoolExecutor(max_workers=_FALLBACK_WORKERS)
+        try:
+            futs = {ex.submit(_one, s): s for s in missing}
+            remaining = max(0.0, deadline - time.time())
+            try:
+                for fut in concurrent.futures.as_completed(futs,
+                                                           timeout=remaining):
+                    sym, cl = fut.result()
+                    if cl:
+                        candles[sym] = cl
+            except concurrent.futures.TimeoutError:
+                logger.warning("candle fallback budget (%ds) exhausted "
+                               "for chunk of %d symbols",
+                               _FALLBACK_BUDGET, len(symbols))
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
         missing = [s for s in symbols if s not in candles]
-    elif missing:
-        logger.warning("bulk download failed for %d/%d symbols — skipping "
-                       "in-parent fallback to protect memory",
-                       len(missing), len(symbols))
+        if missing:
+            logger.warning("candle load: %d/%d symbols still missing",
+                           len(missing), len(symbols))
     return candles, missing
 
 
