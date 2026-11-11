@@ -210,6 +210,15 @@
         $("scan-summary").textContent = "סורק… " + pct + "%" +
           (job.symbol_count ? " (" + job.symbol_count + " סימולים)" : "");
         btn.textContent = "⏳ סורק… " + pct + "%";
+        // Streaming: the server publishes partial results per chunk —
+        // render them live, then restore the progress line on top.
+        if (job.results && Array.isArray(job.results.results) &&
+            job.results.results.length) {
+          renderScanResults(job.results);
+          $("scan-summary").textContent = "סורק… " + pct + "% · נמצאו בינתיים " +
+            (job.results.matched || 0) + " תואמים";
+          btn.textContent = "⏳ סורק… " + pct + "%";
+        }
       }
       if (job.status === "error") throw new Error(job.error || "הסריקה נכשלה");
       renderScanResults(job.results);
@@ -617,4 +626,17 @@
   loadSavedScans();
   loadBaseboFindings();
   bbRefreshNamedSelect();
+
+  /* Live findings: while the scanner page is on screen, refresh the Base
+     Breakout findings every 30s — a running scheduled pass streams its
+     matches into the panel in near-real time. */
+  let bbAutoBusy = false;
+  setInterval(() => {
+    const page = $("bp-scanner");
+    if (!page || page.classList.contains("hidden")) return;
+    if (document.visibilityState && document.visibilityState !== "visible") return;
+    if (bbAutoBusy) return;
+    bbAutoBusy = true;
+    Promise.resolve(loadBaseboFindings()).finally(() => { bbAutoBusy = false; });
+  }, 30000);
 })();

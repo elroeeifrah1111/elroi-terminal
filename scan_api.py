@@ -43,6 +43,8 @@ from scanner import (
     PY_BASEBO_INDICATOR_EXAMPLE,
     PY_BASEBO_SCAN_EXAMPLE,
     PY_STRATEGY_EXAMPLE,
+    _attach_market_info,
+    _blank_result,
     batch_load_candles,
     run_python_indicator,
     run_python_strategy,
@@ -88,14 +90,39 @@ async def _scan_job_worker(job_id: str, symbols: List[str], interval: str,
                            period: str, language: str, code: str) -> None:
     """Background scan worker. The blocking scan runs in a thread
     (asyncio.to_thread) so the event loop stays responsive; results or the
-    error are recorded on the job dict for polling clients."""
+    error are recorded on the job dict for polling clients.
+
+    Streaming: after every chunk the job's "results" is replaced with a
+    partial payload (same shape as the final one, plus "partial": True),
+    so polling clients see matches as they are found instead of waiting
+    for the whole universe. The final payload replaces it wholesale and
+    keeps its historical shape (no "partial" key)."""
     job = _scan_jobs.get(job_id)
     if job is None:
         return
+    partial_results: List[Dict] = []
+
+    def _on_chunk(entries, scanned_so_far, total_symbols):
+        partial_results.extend(entries)
+        matched = sorted(
+            [r for r in partial_results if r.get("signal")],
+            key=lambda r: (-(r.get("score") or 0), r["symbol"]))
+        rest = [r for r in partial_results if not r.get("signal")]
+        job["results"] = {
+            "results": matched + rest,
+            "scanned": scanned_so_far,
+            "matched": len(matched),
+            "matched_symbols": [r["symbol"] for r in matched],
+            "missing": [],
+            "elapsed_seconds": round(time.time() - job["created_at"], 1),
+            "partial": True,
+        }
+
     try:
         results = await asyncio.to_thread(
             _run_scan_job, symbols, interval, period, language, code,
-            lambda done, total: _scan_job_progress(job_id, done, total))
+            lambda done, total: _scan_job_progress(job_id, done, total),
+            _on_chunk)
         job["results"] = results
         job["progress"] = 100
         job["status"] = "done"
@@ -403,16 +430,21 @@ def _get_db() -> sqlite3.Connection:
                     last_run REAL NOT NULL DEFAULT 0,
                     last_matches_json TEXT NOT NULL DEFAULT '[]',
                     last_results_json TEXT NOT NULL DEFAULT '[]',
+                    notified_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL
                 )
                 """
             )
-            # Migration for DBs created before last_results existed.
+            # Migrations for DBs created before these columns existed.
             cols = [r[1] for r in
                     _db_conn.execute("PRAGMA table_info(scans)").fetchall()]
             if "last_results_json" not in cols:
                 _db_conn.execute(
                     "ALTER TABLE scans ADD COLUMN last_results_json "
+                    "TEXT NOT NULL DEFAULT '[]'")
+            if "notified_json" not in cols:
+                _db_conn.execute(
+                    "ALTER TABLE scans ADD COLUMN notified_json "
                     "TEXT NOT NULL DEFAULT '[]'")
             _db_conn.commit()
     return _db_conn
@@ -430,6 +462,11 @@ def _row_to_scan(row: sqlite3.Row) -> Dict:
         "last_matches": json.loads(row["last_matches_json"] or "[]"),
         "last_results": json.loads(
             (row["last_results_json"] if "last_results_json" in row.keys()
+             else None) or "[]"),
+        # Symbols already Telegram-notified during the current/last pass —
+        # the streaming notifier's crash-safe dedupe record.
+        "notified": json.loads(
+            (row["notified_json"] if "notified_json" in row.keys()
              else None) or "[]"),
         "created_at": row["created_at"],
     }
@@ -514,6 +551,18 @@ def db_scan_touch(scan_id: int, matches: List[str],
                 (time.time(), json.dumps(matches or []),
                  json.dumps(slim, ensure_ascii=False), scan_id),
             )
+        conn.commit()
+
+
+def db_scan_set_notified(scan_id: int, symbols: List[str]) -> None:
+    """Persist the set of symbols already notified during the current
+    scheduled pass (crash-safe dedupe for the streaming notifier)."""
+    conn = _get_db()
+    with _db_lock:
+        conn.execute(
+            "UPDATE scans SET notified_json = ? WHERE id = ?",
+            (json.dumps(symbols or []), scan_id),
+        )
         conn.commit()
 
 # ----------------------------------------------------------------------------
@@ -826,27 +875,127 @@ def _malloc_trim() -> None:
         pass
 
 
+# Chunking + per-chunk hard timeouts. A single bad chunk — a hung candle
+# download, a pathological scan — must NEVER stall the whole universe scan
+# (an all_us 5m job once froze at 4.3% for 25+ minutes on one chunk):
+# each phase of each chunk runs under a wall-clock cap proportional to the
+# chunk size, and on timeout/exception the chunk's symbols are recorded as
+# missing (download) or as error results (scan) and the job CONTINUES with
+# the next chunk. The caps are anti-stall backstops, not expected durations
+# (a healthy 500-symbol daily chunk finishes in ~1-4 minutes end to end).
+SCAN_CHUNK_SIZE_INTRADAY = 150
+SCAN_CHUNK_SIZE_DAILY = 500
+CHUNK_DOWNLOAD_TIMEOUT_BASE = 120      # s, plus per-symbol below
+CHUNK_DOWNLOAD_TIMEOUT_PER_SYMBOL = 1
+CHUNK_SCAN_TIMEOUT_BASE = 300          # s, plus per-symbol below
+CHUNK_SCAN_TIMEOUT_PER_SYMBOL = 5
+
+
+def _call_with_timeout(fn, timeout: float, *args, **kwargs):
+    """Run fn in a daemon worker thread under a hard wall-clock timeout.
+
+    Returns fn's result and re-raises fn's own exceptions in the caller.
+    On timeout raises TimeoutError and ABANDONS the worker thread: it is a
+    daemon (never blocks shutdown), and anything it spawned is bounded too
+    — sandbox children carry CPU rlimits and the bulk-download child has
+    its own parent-side kill — so an abandoned phase cannot leak forever.
+    """
+    box: Dict[str, Any] = {}
+
+    def _target():
+        try:
+            box["value"] = fn(*args, **kwargs)
+        except Exception as e:  # noqa: BLE001 — re-raised in the caller
+            box["error"] = e
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(max(1.0, float(timeout)))
+    if t.is_alive():
+        raise TimeoutError(f"חריגת זמן ({int(timeout)} שנ׳)")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+def _shape_scan_results(results: List[Dict]) -> List[Dict]:
+    """The public per-symbol result shape (details flows through untouched)."""
+    return [
+        {**{k: r.get(k) for k in ("symbol", "price", "change_pct",
+                                  "signal", "score", "note", "error")},
+         "details": r.get("details")}
+        for r in results
+    ]
+
+
 def _run_scan_job(symbols: List[str], interval: str, period: str,
-                  language: str, code: str, progress_cb=None) -> Dict:
+                  language: str, code: str, progress_cb=None,
+                  on_chunk=None) -> Dict:
     """Memory-safe: symbols are processed in chunks so we never hold millions
     of candle dicts at once (512MB instance). Results are merged at the end.
-    progress_cb(done_chunks, total_chunks) is invoked after each chunk when
-    the scan runs as a background job."""
+
+    Fault isolation: each chunk's download phase and scan phase run under
+    a hard wall-clock timeout (see _call_with_timeout and the CHUNK_*
+    constants). A chunk that times out or raises is recorded — its symbols
+    go to `missing` (download failure) or come back as error results (scan
+    failure) — and the job continues with the next chunk; the job always
+    terminates.
+
+    progress_cb(done_chunks, total_chunks) fires after each chunk.
+    on_chunk(shaped_chunk_results, scanned_so_far, total_symbols), when
+    given, fires after each chunk too — including failed chunks (with an
+    empty or error-only result list) — so callers can stream partial
+    results/notifications while the job is still running."""
     t0 = time.time()
     intraday = interval not in ("1d", "1wk", "1mo")
-    chunk_size = 150 if intraday else 500
+    chunk_size = SCAN_CHUNK_SIZE_INTRADAY if intraday else SCAN_CHUNK_SIZE_DAILY
     all_results: List[Dict] = []
     missing: List[str] = []
     total_with_data = 0
     total_chunks = max(1, (len(symbols) + chunk_size - 1) // chunk_size)
     for chunk_idx, i in enumerate(range(0, len(symbols), chunk_size)):
         chunk = symbols[i:i + chunk_size]
-        candles_by_symbol, chunk_missing = _scan_candles(chunk, period, interval)
-        total_with_data += len(candles_by_symbol)
-        missing.extend(chunk_missing)
-        chunk_results = run_scan(code, candles_by_symbol, language=language,
-                                 interval=interval)
-        all_results.extend(chunk_results)
+        dl_timeout = (CHUNK_DOWNLOAD_TIMEOUT_BASE
+                      + CHUNK_DOWNLOAD_TIMEOUT_PER_SYMBOL * len(chunk))
+        scan_timeout = (CHUNK_SCAN_TIMEOUT_BASE
+                        + CHUNK_SCAN_TIMEOUT_PER_SYMBOL * len(chunk))
+        chunk_results: List[Dict] = []
+        candles_by_symbol: Dict[str, List[Dict]] = {}
+        try:
+            candles_by_symbol, chunk_missing = _call_with_timeout(
+                _scan_candles, dl_timeout, chunk, period, interval)
+            missing.extend(chunk_missing)
+        except Exception as e:  # noqa: BLE001 — isolate the chunk, continue
+            logger.warning(
+                "scan chunk %d/%d: candle download abandoned (%s) — "
+                "%d symbols marked missing",
+                chunk_idx + 1, total_chunks, e, len(chunk))
+            missing.extend(chunk)
+            candles_by_symbol = {}
+        if candles_by_symbol:
+            total_with_data += len(candles_by_symbol)
+            try:
+                chunk_results = _call_with_timeout(
+                    run_scan, scan_timeout, code, candles_by_symbol,
+                    language=language, interval=interval)
+            except Exception as e:  # noqa: BLE001 — isolate, continue
+                logger.warning(
+                    "scan chunk %d/%d: scan phase abandoned (%s) — "
+                    "%d symbols recorded as errors",
+                    chunk_idx + 1, total_chunks, e, len(candles_by_symbol))
+                chunk_results = [
+                    _attach_market_info(
+                        {**_blank_result(sym),
+                         "error": str(e)[:200] or "הסריקה נכשלה"}, cdls)
+                    for sym, cdls in candles_by_symbol.items()
+                ]
+            all_results.extend(chunk_results)
+        if on_chunk is not None:
+            try:
+                on_chunk(_shape_scan_results(chunk_results),
+                         total_with_data, len(symbols))
+            except Exception:
+                logger.exception("scan job on_chunk callback failed")
         del candles_by_symbol, chunk_results, chunk
         gc.collect()
         _malloc_trim()
@@ -858,12 +1007,7 @@ def _run_scan_job(symbols: List[str], interval: str, period: str,
                   key=lambda r: r["symbol"])
     ordered = matched + rest
     return {
-        "results": [
-            {**{k: r.get(k) for k in ("symbol", "price", "change_pct",
-                                      "signal", "score", "note", "error")},
-             "details": r.get("details")}
-            for r in ordered
-        ],
+        "results": _shape_scan_results(ordered),
         "scanned": total_with_data,
         "matched": len(matched),
         "matched_symbols": [r["symbol"] for r in matched],
@@ -1241,7 +1385,98 @@ def api_run_saved_scan(scan_id: int):
 # ----------------------------------------------------------------------------
 # Scheduled scans — daemon thread, Telegram on NEW matches only
 # ----------------------------------------------------------------------------
+def _notify_line(s: Dict, by_sym: Dict, sym: str) -> str:
+    """One match's line inside a Telegram notification (text or caption)."""
+    r = by_sym.get(sym, {})
+    price = r.get("price")
+    chg = r.get("change_pct", 0) or 0
+    note = (r.get("note") or "").strip()
+    price_s = f"${price:.2f}" if isinstance(price, (int, float)) else "-"
+    line = f"• *{escape_md(sym)}* — {price_s} ({chg:+.1f}%)"
+    det = r.get("details")
+    if isinstance(det, dict):
+        corr = det.get("correlation") or []
+        for c in corr:
+            if isinstance(c, dict) and c.get("line"):
+                line += f"\n  {escape_md(str(c['line']))}"
+        line += (f"\n  🔗 https://www.tradingview.com/chart/"
+                 f"?symbol={sym}")
+    elif note:
+        line += f"\n  {escape_md(note)}"
+    return line
+
+
+def _notify_caption(s: Dict, by_sym: Dict, sym: str) -> str:
+    """Photo caption for one new match (rich BASE_BO details when present)."""
+    r = by_sym.get(sym, {})
+    head = (f"🔍 *סריקה: {escape_md(s['name'])}*\n"
+            + _notify_line(s, by_sym, sym))
+    det = r.get("details")
+    if not isinstance(det, dict):
+        return head
+    extra = (
+        f"\n🎯 פריצת בסיס מאושרת ({escape_md(str(det.get('interval') or s['interval']))})"
+        f"\nמחיר פריצה: ${float(det.get('breakout_price') or 0):.2f}"
+        f" (אזור: {float(det.get('zone_low') or 0):.2f}-{float(det.get('zone_high') or 0):.2f})"
+        f"\n📊 ווליום פריצה: {_fmt_vol(det.get('breakout_volume'))}"
+        f" מול ממוצע 50: {_fmt_vol(det.get('vol_avg50'))}"
+        f" (פי {float(det.get('vol_ratio') or 0):.2f})"
+        f"\n📉 ווליום מוכרים בבדיקה: {_fmt_vol(det.get('seller_vol_mean'))}"
+        f" ({float(det.get('seller_vs_breakout') or 0) * 100:.0f}% מהפריצה,"
+        f" שיפוע {float(det.get('seller_vol_slope') or 0):+.0f})")
+    return head + extra
+
+
+def _notify_scan_matches(s: Dict, entries: List[Dict]) -> None:
+    """Telegram-notify ONE batch of new matches (streaming: called per
+    chunk during a scheduled pass). One photo message per match (chart +
+    details in the caption), up to 10 photos per batch. Anything not
+    photographed — beyond the cap or a chart/photo failure — still goes
+    out in the batch's text message, so no match is ever lost over a
+    picture. Same message format as the historical end-of-run notify."""
+    if not entries:
+        return
+    by_sym = {r["symbol"]: r for r in entries}
+    syms = [r["symbol"] for r in entries]
+    photographed = []
+    for sym in syms[:10]:
+        det = (by_sym.get(sym, {}) or {}).get("details")
+        png = _chart_png(sym, s["period"], s["interval"], details=det)
+        if png is None:
+            continue
+        if send_telegram_photo(png, _notify_caption(s, by_sym, sym)):
+            photographed.append(sym)
+    rest = [sym for sym in syms if sym not in photographed]
+    if rest:
+        lines = [_notify_line(s, by_sym, sym) for sym in rest[:15]]
+        more = f"\n_ועוד {len(rest) - 15}…_" if len(rest) > 15 else ""
+        msg = (f"🔍 *סריקה: {escape_md(s['name'])}*\n"
+               f"נמצאו {len(syms)} סימולים חדשים תואמים:\n\n"
+               + "\n".join(lines) + more)
+        send_telegram_message(msg)
+    logger.info("scheduled scan #%d: notified %d new matches "
+                "(%d with chart photos)", s["id"], len(syms),
+                len(photographed))
+
+
 def _execute_scheduled_scan(s: Dict) -> None:
+    """Run one scheduled pass with streaming throughout:
+
+    - after every chunk, matches found SO FAR are persisted via
+      db_scan_touch, so the terminal findings panel updates in near-real
+      time during a long pass (the final touch writes the complete pass);
+    - NEW matches (not in the previous completed pass's match set, not
+      already notified earlier in this pass) are Telegram-notified per
+      chunk, as they are found. The notified set is persisted to the scan
+      row (notified_json) after every batch, and the incremental
+      last_matches writes double as crash protection: if the process dies
+      mid-pass, the next pass's "previous matches" already include every
+      symbol that was notified, so it is not notified twice. A symbol
+      that stays matched across passes is notified once, on the first
+      pass where it appears.
+    - the first ever pass is a baseline: it streams results into
+      last_results but notifies nothing.
+    """
     first_run = not s["last_run"]
     try:
         symbols = _resolve_scan_symbols(s["source"])
@@ -1250,9 +1485,47 @@ def _execute_scheduled_scan(s: Dict) -> None:
             logger.warning("scheduled scan #%d: empty symbol list", s["id"])
             db_scan_touch(s["id"], [])
             return
+    except Exception:
+        logger.exception("scheduled scan #%d failed", s["id"])
+        return
+
+    prev_matches = set(s.get("last_matches") or [])
+    notified: set = set()
+    try:
+        db_scan_set_notified(s["id"], [])
+    except Exception:
+        logger.exception("scheduled scan #%d: notified reset failed",
+                         s["id"])
+    acc_results: List[Dict] = []
+    acc_matched: List[str] = []
+    telegram_ok = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
+    def _on_chunk(entries, scanned_so_far, total_symbols):
+        acc_results.extend(entries)
+        fresh: List[Dict] = []
+        for e in entries:
+            if not e.get("signal"):
+                continue
+            sym = e["symbol"]
+            acc_matched.append(sym)
+            if (not first_run and telegram_ok
+                    and sym not in prev_matches and sym not in notified):
+                fresh.append(e)
+        if fresh:
+            _notify_scan_matches(s, fresh)
+            notified.update(e["symbol"] for e in fresh)
+            try:
+                db_scan_set_notified(s["id"], sorted(notified))
+            except Exception:
+                logger.exception(
+                    "scheduled scan #%d: notified persist failed", s["id"])
+        # Stream partial state so the findings panel stays near-live.
+        db_scan_touch(s["id"], list(acc_matched), list(acc_results))
+
+    try:
         # No symbol limits (user requirement).
         out = _run_scan_job(symbols, s["interval"], s["period"],
-                            s["language"], s["code"])
+                            s["language"], s["code"], on_chunk=_on_chunk)
     except Exception:
         logger.exception("scheduled scan #%d failed", s["id"])
         return
@@ -1261,73 +1534,10 @@ def _execute_scheduled_scan(s: Dict) -> None:
     if first_run:
         logger.info("scheduled scan #%d first run: %d matches (no notify)",
                     s["id"], len(matched))
-        return
-    prev = set(s.get("last_matches") or [])
-    new = [m for m in matched if m not in prev]
-    if new and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        by_sym = {r["symbol"]: r for r in out.get("results", [])}
-
-        def _line(sym):
-            r = by_sym.get(sym, {})
-            price = r.get("price")
-            chg = r.get("change_pct", 0) or 0
-            note = (r.get("note") or "").strip()
-            price_s = f"${price:.2f}" if isinstance(price, (int, float)) else "-"
-            line = f"• *{escape_md(sym)}* — {price_s} ({chg:+.1f}%)"
-            det = r.get("details")
-            if isinstance(det, dict):
-                corr = det.get("correlation") or []
-                for c in corr:
-                    if isinstance(c, dict) and c.get("line"):
-                        line += f"\n  {escape_md(str(c['line']))}"
-                line += (f"\n  🔗 https://www.tradingview.com/chart/"
-                         f"?symbol={sym}")
-            elif note:
-                line += f"\n  {escape_md(note)}"
-            return line
-
-        def _caption(sym):
-            r = by_sym.get(sym, {})
-            head = (f"🔍 *סריקה: {escape_md(s['name'])}*\n"
-                    + _line(sym))
-            det = r.get("details")
-            if not isinstance(det, dict):
-                return head
-            extra = (
-                f"\n🎯 פריצת בסיס מאושרת ({escape_md(str(det.get('interval') or s['interval']))})"
-                f"\nמחיר פריצה: ${float(det.get('breakout_price') or 0):.2f}"
-                f" (אזור: {float(det.get('zone_low') or 0):.2f}-{float(det.get('zone_high') or 0):.2f})"
-                f"\n📊 ווליום פריצה: {_fmt_vol(det.get('breakout_volume'))}"
-                f" מול ממוצע 50: {_fmt_vol(det.get('vol_avg50'))}"
-                f" (פי {float(det.get('vol_ratio') or 0):.2f})"
-                f"\n📉 ווליום מוכרים בבדיקה: {_fmt_vol(det.get('seller_vol_mean'))}"
-                f" ({float(det.get('seller_vs_breakout') or 0) * 100:.0f}% מהפריצה,"
-                f" שיפוע {float(det.get('seller_vol_slope') or 0):+.0f})")
-            return head + extra
-
-        # One photo message per new match (chart + details in the caption),
-        # up to 10 photos per run. Anything not photographed — beyond the
-        # cap or a chart/photo failure — still goes out in a text message,
-        # so no match is ever lost over a picture.
-        photographed = []
-        for sym in new[:10]:
-            det = (by_sym.get(sym, {}) or {}).get("details")
-            png = _chart_png(sym, s["period"], s["interval"], details=det)
-            if png is None:
-                continue
-            if send_telegram_photo(png, _caption(sym)):
-                photographed.append(sym)
-        rest = [sym for sym in new if sym not in photographed]
-        if rest:
-            lines = [_line(sym) for sym in rest[:15]]
-            more = f"\n_ועוד {len(rest) - 15}…_" if len(rest) > 15 else ""
-            msg = (f"🔍 *סריקה: {escape_md(s['name'])}*\n"
-                   f"נמצאו {len(new)} סימולים חדשים תואמים:\n\n"
-                   + "\n".join(lines) + more)
-            send_telegram_message(msg)
-        logger.info("scheduled scan #%d: notified %d new matches "
-                    "(%d with chart photos)", s["id"], len(new),
-                    len(photographed))
+    else:
+        logger.info("scheduled scan #%d finished: %d matches, "
+                    "%d notified during the pass",
+                    s["id"], len(matched), len(notified))
 
 
 def _background_scan_runner():

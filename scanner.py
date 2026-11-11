@@ -59,6 +59,17 @@ DOWNLOAD_WORKERS = 2       # parallel chunk downloads (512MB instance)
 PER_SYMBOL_TIMEOUT = 60    # wall-clock seconds per symbol (child is killed after)
 SCAN_WORKERS = 2           # concurrent sandbox child processes (512MB instance)
 SCAN_CHILD_MEM_HEADROOM = 768 * 1024 * 1024  # extra address space per child
+# Batch workers: one sandbox child runs the script for a whole batch of
+# symbols sequentially, amortizing interpreter/pandas startup over the
+# batch instead of paying it per symbol. A single hung symbol is cut off
+# inside the child by a SIGALRM at PER_SYMBOL_TIMEOUT (same error message
+# as the old per-symbol kill); the parent additionally enforces a batch
+# wall-clock budget of BASE + PER_SYMBOL * batch_size (120s + 10s/symbol,
+# i.e. 370s for a full batch of 25) and kills the child past it — partial
+# results streamed to the result file survive either way.
+SCAN_BATCH_SIZE = 25            # symbols handled by one sandbox child
+SCAN_BATCH_TIMEOUT_BASE = 120   # fixed wall-clock budget per batch child (s)
+SCAN_BATCH_TIMEOUT_PER_SYMBOL = 10  # + wall-clock seconds per batched symbol
 # No cap on the number of symbols per scan, at any interval — large
 # universes run through the chunked/async machinery; protection is the
 # per-symbol timeout and chunk sizes, never the universe size.
@@ -683,22 +694,19 @@ def _self_vsz_bytes() -> int:
     return 0
 
 
-def _sandbox_child_main(result_path: str, code: str, symbol: str, interval: str,
-                        candles: List[Dict], language: str) -> None:
-    """Child-process entry point. Never called in the server process.
+def _sandbox_setup(cpu_soft: int) -> None:
+    """Sandbox hardening shared by the single-symbol and batch child entry
+    points. Runs INSIDE the child process only; every step is individually
+    guarded so setup itself never propagates an exception.
 
-    FD SAFETY: a forked child inherits the request worker's file descriptors
-    (live client sockets, DB handles, ...). If the child exits normally,
-    interpreter cleanup closes those inherited FDs, which can sever the
-    client's own connection mid-response. So the child closes every FD >= 3
-    first, reports back only through a result file opened by path, and leaves
-    via os._exit() to skip all cleanup of inherited objects.
+    cpu_soft: RLIMIT_CPU soft cap (seconds) — the backstop that kills an
+    orphaned child (dead parent) by CPU time; hard cap is cpu_soft + 30.
     """
+    # FD SAFETY: close every inherited FD >= 3 first (see _sandbox_child_main).
     try:
         os.closerange(3, 65536)
     except Exception:
         pass
-    base = {"symbol": symbol, "signal": False, "score": 0.0, "note": "", "error": ""}
     try:
         sys.dont_write_bytecode = True
         # Crash diagnostics: if the child dies on a native fault (SIGSEGV
@@ -728,8 +736,7 @@ def _sandbox_child_main(result_path: str, code: str, symbol: str, interval: str,
             mem_cap = (vsz + SCAN_CHILD_MEM_HEADROOM) if vsz > 0 else 2 * 1024 ** 3
             _resource.setrlimit(_resource.RLIMIT_AS, (mem_cap, mem_cap))
             # Backstop for orphaned children (parent died): CPU time kills them.
-            cpu = PER_SYMBOL_TIMEOUT + 60
-            _resource.setrlimit(_resource.RLIMIT_CPU, (cpu, cpu + 30))
+            _resource.setrlimit(_resource.RLIMIT_CPU, (cpu_soft, cpu_soft + 30))
         except Exception:
             pass
         # Silence the child: user print() must not spam server logs.
@@ -739,6 +746,24 @@ def _sandbox_child_main(result_path: str, code: str, symbol: str, interval: str,
             os.dup2(_devnull, 2)
         except Exception:
             pass
+    except Exception:
+        pass
+
+
+def _sandbox_child_main(result_path: str, code: str, symbol: str, interval: str,
+                        candles: List[Dict], language: str) -> None:
+    """Child-process entry point. Never called in the server process.
+
+    FD SAFETY: a forked child inherits the request worker's file descriptors
+    (live client sockets, DB handles, ...). If the child exits normally,
+    interpreter cleanup closes those inherited FDs, which can sever the
+    client's own connection mid-response. So the child closes every FD >= 3
+    first, reports back only through a result file opened by path, and leaves
+    via os._exit() to skip all cleanup of inherited objects.
+    """
+    base = {"symbol": symbol, "signal": False, "score": 0.0, "note": "", "error": ""}
+    try:
+        _sandbox_setup(PER_SYMBOL_TIMEOUT + 60)
         try:
             res = _exec_one((code, symbol, interval, candles, language))
         except Exception as e:  # noqa: BLE001 — never let the child die silent
@@ -837,62 +862,187 @@ def _collect_child(a: Dict[str, Any]) -> Dict[str, Any]:
     return res
 
 
+class _SymbolTimeout(BaseException):
+    """Raised by the batch child's SIGALRM handler when one symbol's scan
+    overruns PER_SYMBOL_TIMEOUT — the batch records the standard timeout
+    error for that symbol and moves on to the next one.
+
+    Deliberately a BaseException, NOT an Exception: the _exec_*_one
+    helpers format any Exception escaping user code as a per-symbol scan
+    error ("שגיאה ב-scan(): …"), which would swallow the timeout (and its
+    message) before the batch loop could convert it. As a BaseException
+    it propagates through those handlers untouched and is caught only by
+    the batch loop's explicit `except _SymbolTimeout`."""
+
+
+def _batch_alarm_handler(signum, frame):  # noqa: ANN001 — signal handler
+    raise _SymbolTimeout(f"חריגת זמן ({PER_SYMBOL_TIMEOUT} שנ׳)")
+
+
+def _batch_budget(n: int) -> int:
+    """Wall-clock budget (seconds) for a batch child of n symbols."""
+    return SCAN_BATCH_TIMEOUT_BASE + SCAN_BATCH_TIMEOUT_PER_SYMBOL * max(1, n)
+
+
+def _sandbox_batch_child_main(result_path: str, code: str,
+                              batch_items: List[Tuple[str, List[Dict]]],
+                              interval: str, language: str) -> None:
+    """Batch child-process entry point. Never called in the server process.
+
+    Runs the scan script for up to SCAN_BATCH_SIZE symbols sequentially in
+    ONE process, so interpreter/pandas startup is paid once per batch
+    instead of once per symbol. Same FD-safety contract as
+    _sandbox_child_main (see its docstring): results are reported only
+    through the result file, stdio is silenced, exit via os._exit().
+
+    Per-symbol isolation inside the batch: a SIGALRM timer caps each
+    symbol at PER_SYMBOL_TIMEOUT and raises _SymbolTimeout, so one hung
+    symbol yields the standard timeout error and the batch continues.
+    Each finished symbol's result is appended to the result file and
+    fsync'd immediately, so if the parent kills the child for overrunning
+    the batch budget, the completed symbols' results survive.
+    """
+    budget = _batch_budget(len(batch_items))
+    _sandbox_setup(budget + 60)
+    try:
+        import signal as _signal
+        _signal.signal(_signal.SIGALRM, _batch_alarm_handler)
+    except Exception:
+        _signal = None  # no per-symbol cap; the parent budget still applies
+    try:
+        with open(result_path, "wb") as f:
+            for symbol, candles in batch_items:
+                base = {"symbol": symbol, "signal": False, "score": 0.0,
+                        "note": "", "error": ""}
+                try:
+                    if _signal is not None:
+                        _signal.setitimer(_signal.ITIMER_REAL,
+                                          PER_SYMBOL_TIMEOUT)
+                    try:
+                        res = _exec_one((code, symbol, interval, candles,
+                                         language))
+                    finally:
+                        if _signal is not None:
+                            _signal.setitimer(_signal.ITIMER_REAL, 0)
+                except _SymbolTimeout:
+                    base["error"] = f"חריגת זמן ({PER_SYMBOL_TIMEOUT} שנ׳)"
+                    res = base
+                except Exception as e:  # noqa: BLE001 — never die silent
+                    base["error"] = str(e)[:200] or "שגיאה לא ידועה"
+                    res = base
+                try:
+                    pickle.dump(res, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    os._exit(0)
+
+
+def _collect_batch_child(a: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Collect a batch child's streamed results (one pickle record per
+    finished symbol). Symbols the child never reached — batch budget kill
+    or a crash — are filled in with blank error results, so the caller
+    always gets exactly one result per batched symbol, in batch order."""
+    p, result_path = a["p"], a["result_path"]
+    symbols = a["symbols"]
+    found: Dict[str, Dict[str, Any]] = {}
+    try:
+        with open(result_path, "rb") as f:
+            while True:
+                try:
+                    rec = pickle.load(f)
+                except Exception:
+                    break  # EOF or a record truncated by a kill — stop
+                if isinstance(rec, dict) and rec.get("symbol") is not None:
+                    found.setdefault(str(rec["symbol"]), rec)
+    except Exception:
+        pass
+    finally:
+        try:
+            os.unlink(result_path)
+        except Exception:
+            pass
+    out: List[Dict[str, Any]] = []
+    for sym in symbols:
+        if sym in found:
+            out.append(found[sym])
+            continue
+        res = _blank_result(sym)
+        if a["killed"]:
+            res["error"] = f"חריגת זמן ({PER_SYMBOL_TIMEOUT} שנ׳)"
+        elif p.exitcode not in (0, None):
+            res["error"] = f"תהליך הסריקה קרס (קוד {p.exitcode})"
+            diag = _read_child_fault_log(getattr(p, "pid", None))
+            if diag:
+                res["error"] += f" | {diag}"
+        else:
+            res["error"] = "התהליך הסתיים ללא תוצאה"
+        out.append(res)
+    return out
+
+
 def _run_isolated(code: str, items: List[Tuple[str, List[Dict]]], language: str,
                   interval: str,
                   progress_cb: Optional[Callable[[int, int], None]]) -> List[Dict[str, Any]]:
-    """Run one scan script per symbol, each in its own child process.
+    """Run a scan script over all symbols in hardened BATCH child processes.
 
-    A hanging or exploding script can only kill its own child — the parent
-    enforces a wall-clock timeout and reaps it. The server process itself
-    never executes user code.
+    Items are grouped into batches of SCAN_BATCH_SIZE; each batch runs in
+    one forkserver child that executes the script per symbol sequentially
+    (startup amortized across the batch), with SCAN_WORKERS batches in
+    flight concurrently. A hanging or exploding script can only hurt its
+    own batch: a per-symbol SIGALRM inside the child caps each symbol, the
+    parent enforces the batch wall-clock budget and reaps overruns, and
+    unfinished symbols come back as error results — never a stall. The
+    server process itself never executes user code.
     """
     try:
-                # forkserver: workers are forked from a clean single-threaded server
-             # process — safe when the caller is a FastAPI threadpool thread.
-     ctx = multiprocessing.get_context("forkserver")
+        # forkserver: workers are forked from a clean single-threaded server
+        # process — safe when the caller is a FastAPI threadpool thread.
+        ctx = multiprocessing.get_context("forkserver")
     except (ValueError, AttributeError) as e:
         raise RuntimeError("הרצת סריקות דורשת סביבת Linux") from e
     total = len(items)
     results: List[Dict[str, Any]] = []
+    if total == 0:
+        return results
+    batches = [items[i:i + SCAN_BATCH_SIZE]
+               for i in range(0, total, SCAN_BATCH_SIZE)]
     done = 0
     idx = 0
     active: List[Dict[str, Any]] = []
-    while idx < total or active:
-        while idx < total and len(active) < SCAN_WORKERS:
-            sym, candles = items[idx]
+    while idx < len(batches) or active:
+        while idx < len(batches) and len(active) < SCAN_WORKERS:
+            batch = batches[idx]
             idx += 1
-            fd, result_path = tempfile.mkstemp(prefix="scan_sym_")
+            fd, result_path = tempfile.mkstemp(prefix="scan_batch_")
             os.close(fd)
-            p = ctx.Process(target=_sandbox_child_main,
-                            args=(result_path, code, sym, interval, candles, language))
+            p = ctx.Process(target=_sandbox_batch_child_main,
+                            args=(result_path, code, batch, interval, language))
             p.start()
-            active.append({"p": p, "result_path": result_path, "sym": sym,
-                           "start": time.time(), "killed": False})
+            active.append({"p": p, "result_path": result_path,
+                           "symbols": [sym for sym, _ in batch],
+                           "start": time.time(), "killed": False,
+                           "budget": _batch_budget(len(batch))})
         time.sleep(0.05)
         still: List[Dict[str, Any]] = []
         for a in active:
             p = a["p"]
-            if p.is_alive() and time.time() - a["start"] > PER_SYMBOL_TIMEOUT:
+            if p.is_alive() and time.time() - a["start"] > a["budget"]:
                 _terminate_proc(p)
                 a["killed"] = True
             if p.is_alive():
                 still.append(a)
                 continue
-            if a["killed"]:
-                res = _blank_result(a["sym"])
-                res["error"] = f"חריגת זמן ({PER_SYMBOL_TIMEOUT} שנ׳)"
-                try:
-                    os.unlink(a["result_path"])
-                except Exception:
-                    pass
-            else:
-                res = _collect_child(a)
+            batch_results = _collect_batch_child(a)
             try:
                 p.close()
             except Exception:
                 pass
-            results.append(res)
-            done += 1
+            results.extend(batch_results)
+            done += len(batch_results)
             if progress_cb:
                 try:
                     progress_cb(done, total)
