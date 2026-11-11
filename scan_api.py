@@ -1250,7 +1250,7 @@ def _execute_scheduled_scan(s: Dict) -> None:
             price = r.get("price")
             chg = r.get("change_pct", 0) or 0
             note = (r.get("note") or "").strip()
-            price_s = f"${price:.2f}" if isinstance(price, (int, float)) else "—"
+            price_s = f"${price:.2f}" if isinstance(price, (int, float)) else "-"
             line = f"• *{escape_md(sym)}* — {price_s} ({chg:+.1f}%)"
             det = r.get("details")
             if isinstance(det, dict):
@@ -1274,7 +1274,7 @@ def _execute_scheduled_scan(s: Dict) -> None:
             extra = (
                 f"\n🎯 פריצת בסיס מאושרת ({escape_md(str(det.get('interval') or s['interval']))})"
                 f"\nמחיר פריצה: ${float(det.get('breakout_price') or 0):.2f}"
-                f" (אזור: {float(det.get('zone_low') or 0):.2f}–{float(det.get('zone_high') or 0):.2f})"
+                f" (אזור: {float(det.get('zone_low') or 0):.2f}-{float(det.get('zone_high') or 0):.2f})"
                 f"\n📊 ווליום פריצה: {_fmt_vol(det.get('breakout_volume'))}"
                 f" מול ממוצע 50: {_fmt_vol(det.get('vol_avg50'))}"
                 f" (פי {float(det.get('vol_ratio') or 0):.2f})"
