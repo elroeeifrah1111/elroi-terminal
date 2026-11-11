@@ -289,14 +289,31 @@ def _chart_png(symbol: str, period: str, interval: str,
                                         lw=1.1))
             ax.text(start + 1, zup, " ZONE", color="#f5b301", fontsize=8,
                     va="bottom")
+            # Exact price tags on the right edge (user request): zone
+            # bounds in yellow, last close in a blue tag.
+            ax.text(end - 0.3, zup, f" {zup:.2f}", color="#f5b301",
+                    fontsize=8, va="center", fontweight="bold",
+                    clip_on=False)
+            ax.text(end - 0.3, zlo, f" {zlo:.2f}", color="#f5b301",
+                    fontsize=8, va="center", fontweight="bold",
+                    clip_on=False)
+            _last = closes[-1]
+            ax.axhline(_last, color="#787b86", linewidth=0.7,
+                       linestyle=":")
+            ax.text(end - 0.3, _last, f" {_last:.2f}", color="#ffffff",
+                    fontsize=8, va="center", clip_on=False,
+                    bbox=dict(facecolor="#2962ff", edgecolor="none",
+                              pad=1.2))
             # --- volume panel: reference line, breakout bar, arrows ---
             axv.axhline(avg50, color="#f5b301", linewidth=1.2)
-            axv.text(start + 1, avg50, " VolAvg50", color="#f5b301",
-                     fontsize=7, va="bottom")
+            axv.text(start + 1, avg50, f" VolAvg50 {avg50:,.0f}",
+                     color="#f5b301", fontsize=7, va="bottom")
             bi = bb - start
             if 0 <= bi < len(view):
                 axv.bar([bb], [vols[bi]], width=0.64, color="#ffd54f",
                         edgecolor="#ffffff", linewidth=1.2, zorder=5)
+            axv.text(bb, bvol * 1.07, f"{bvol:,.0f}", color="#ffd54f",
+                     fontsize=7, ha="center")
             wstart = max(start, int(det.get("vol_window_start",
                                             bb - 50)))
             ymax = max(vols) if vols else 1.0
@@ -323,6 +340,11 @@ def _chart_png(symbol: str, period: str, interval: str,
         else:
             ax.axhline(closes[-1], color="#2962ff", linewidth=0.9,
                        linestyle="--")
+            ax.text(end - 0.3, closes[-1], f" {closes[-1]:.2f}",
+                    color="#ffffff", fontsize=8, va="center",
+                    clip_on=False,
+                    bbox=dict(facecolor="#2962ff", edgecolor="none",
+                              pad=1.2))
             ax.set_title(f"{symbol} - {interval} - last {closes[-1]:.2f}",
                          color="#ffffff")
         ax.grid(True, alpha=0.25)
