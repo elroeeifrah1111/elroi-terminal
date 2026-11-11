@@ -217,10 +217,12 @@ def _chart_png(symbol: str, period: str, interval: str,
     With a BASE_BO `details` payload the chart is the full annotated
     picture the user asked for: two synced panels (price + volume), the
     identified breakout zone shaded across the window, the breakout
-    candle marked with its price, and on the volume panel a yellow
-    average-50 reference line, the highlighted breakout bar, a white
-    trend arrow over the volume measurement window, and a white
-    regression line over the seller bars of the support retest.
+    candle marked with its price, swing high / swing low markers and a
+    confirmation-candle marker on the price panel, and on the volume
+    panel a yellow average-50 reference line, the highlighted breakout
+    bar, and one straight step line over each volume chunk (rising over
+    the breakout-to-swing-high chunk, falling over the swing-high-to-
+    swing-low chunk) connecting the chunk's compressed step values.
     Without details (or if they do not line up with the loaded candles)
     it degrades to the plain last-candles chart.
 
@@ -251,19 +253,30 @@ def _chart_png(symbol: str, period: str, interval: str,
 
         n_all = len(candles)
         det = details if isinstance(details, dict) else None
-        bb = re_end = -1
+        bb = -1
+        sh = sl = tb = None
+        end_bar = -1
         if det is not None:
-            try:
-                bb = int(det["breakout_bar"])
-                re_end = int(det["retest_end_bar"])
-                if not (0 <= bb < n_all and bb <= re_end < n_all):
-                    det = None
-            except (KeyError, TypeError, ValueError):
+            def _bar(key):
+                try:
+                    v = int(det.get(key))
+                except (TypeError, ValueError):
+                    return None
+                return v if 0 <= v < n_all else None
+
+            bb = _bar("breakout_bar")
+            if bb is None:
                 det = None
+            else:
+                sh = _bar("swing_high_bar")
+                sl = _bar("swing_low_bar")
+                tb = _bar("trigger_bar")
+                end_bar = max([bb] + [x for x in (sh, sl, tb)
+                                      if x is not None])
 
         if det is not None:
             start = max(0, bb - 110)
-            end = min(n_all, re_end + 6)
+            end = min(n_all, end_bar + 6)
         else:
             start = max(0, n_all - max_candles)
             end = n_all
@@ -301,20 +314,50 @@ def _chart_png(symbol: str, period: str, interval: str,
             zup = float(det["zone_high"])
             bprice = float(det["breakout_price"])
             bvol = float(det["breakout_volume"])
-            avg50 = float(det["vol_avg50"])
-            r0 = int(det["retest_start_bar"])
+            avg50 = det.get("vol_avg50")
+            avg50 = float(avg50) if avg50 else 0.0
             # --- price panel: zone band + breakout marker ---
             ax.axhspan(zlo, zup, color="#f5b301", alpha=0.22, zorder=0)
             ax.axhline(zlo, color="#f5b301", linewidth=1.0)
             ax.axhline(zup, color="#f5b301", linewidth=1.0)
-            ax.axvspan(r0 - 0.5, re_end + 0.5, color="#ffffff", alpha=0.06,
-                       zorder=0)
+            if sh is not None and sl is not None:
+                ax.axvspan(sh - 0.5, sl + 0.5, color="#ffffff", alpha=0.06,
+                           zorder=0)
             ax.axvline(bb, color="#ffffff", linewidth=0.9, linestyle="--")
             ax.annotate(f"BREAKOUT {bprice:.2f}",
                         xy=(bb, bprice), xytext=(bb, zup * 1.03),
                         color="#ffffff", fontsize=8, ha="center",
                         arrowprops=dict(arrowstyle="->", color="#ffffff",
                                         lw=1.1))
+            # Swing high / swing low markers on the price panel.
+            if sh is not None and det.get("swing_high_price"):
+                shp = float(det["swing_high_price"])
+                ax.plot([sh], [shp], marker="v", color="#f23645",
+                        markersize=7, clip_on=False, zorder=6)
+                ax.annotate(f"SWING HIGH {shp:.2f}", xy=(sh, shp),
+                            textcoords="offset points", xytext=(0, -16),
+                            color="#f23645", fontsize=8, ha="center",
+                            va="top")
+            if sl is not None and det.get("swing_low_price"):
+                slp = float(det["swing_low_price"])
+                ax.plot([sl], [slp], marker="^", color="#089981",
+                        markersize=7, clip_on=False, zorder=6)
+                ax.annotate(f"SWING LOW {slp:.2f}", xy=(sl, slp),
+                            xytext=(sl, slp * 0.98), color="#089981",
+                            fontsize=8, ha="center", va="top")
+            # Confirmation (trigger) candle marker.
+            if tb is not None:
+                ax.axvline(tb, color="#089981", linewidth=1.1,
+                           linestyle="--")
+                tprice = det.get("trigger_price")
+                if tprice:
+                    ax.annotate(f"CONFIRM {float(tprice):.2f}",
+                                xy=(tb, float(tprice)),
+                                xytext=(tb, float(tprice) * 1.045),
+                                color="#089981",
+                                fontsize=8, ha="center",
+                                arrowprops=dict(arrowstyle="->",
+                                                color="#089981", lw=1.1))
             ax.text(start + 1, zup, " ZONE", color="#f5b301", fontsize=8,
                     va="bottom")
             # Exact price tags on the right edge (user request): zone
@@ -332,37 +375,47 @@ def _chart_png(symbol: str, period: str, interval: str,
                     fontsize=8, va="center", clip_on=False,
                     bbox=dict(facecolor="#2962ff", edgecolor="none",
                               pad=1.2))
-            # --- volume panel: reference line, breakout bar, arrows ---
-            axv.axhline(avg50, color="#f5b301", linewidth=1.2)
-            axv.text(start + 1, avg50, f" VolAvg50 {avg50:,.0f}",
-                     color="#f5b301", fontsize=7, va="bottom")
+            # --- volume panel: reference line, breakout bar, step lines ---
+            if avg50 > 0:
+                axv.axhline(avg50, color="#f5b301", linewidth=1.2)
+                axv.text(start + 1, avg50, f" VolAvg50 {avg50:,.0f}",
+                         color="#f5b301", fontsize=7, va="bottom")
             bi = bb - start
             if 0 <= bi < len(view):
                 axv.bar([bb], [vols[bi]], width=0.64, color="#ffd54f",
                         edgecolor="#ffffff", linewidth=1.2, zorder=5)
             axv.text(bb, bvol * 1.07, f"{bvol:,.0f}", color="#ffd54f",
                      fontsize=7, ha="center")
-            wstart = max(start, int(det.get("vol_window_start",
-                                            bb - 50)))
             ymax = max(vols) if vols else 1.0
-            axv.annotate("", xy=(bb, bvol * 1.04),
-                         xytext=(wstart, avg50 * 1.04),
-                         arrowprops=dict(arrowstyle="->", color="#ffffff",
-                                         lw=1.6))
-            sx, sy = [], []
-            for gi in range(max(r0, start), min(re_end, end - 1) + 1):
-                li = gi - start
-                if closes[li] < opens[li]:
-                    sx.append(gi)
-                    sy.append(vols[li])
-            if len(sx) >= 2:
-                k, m = np.polyfit(np.array(sx, dtype=float),
-                                  np.array(sy, dtype=float), 1)
-                axv.plot([sx[0], sx[-1]],
-                         [k * sx[0] + m, k * sx[-1] + m],
-                         color="#ffffff", linewidth=1.6)
+
+            def _step_line(c0, c1):
+                """One straight line over a volume chunk connecting its
+                compressed step values (same ~5-step compression as the
+                detector; y = per-candle average of each step so the
+                line sits on the volume bars' own scale)."""
+                if c0 is None or c1 is None or c1 <= c0:
+                    return
+                seg = vols[c0 - start:c1 - start + 1]
+                L = len(seg)
+                if L < 2:
+                    return
+                w = max(1, -(-L // 5))
+                px, py = [], []
+                for j in range(0, L, w):
+                    grp = seg[j:j + w]
+                    px.append(c0 + j + (len(grp) - 1) / 2.0)
+                    py.append(sum(grp) / len(grp))
+                if len(px) >= 2:
+                    axv.plot(px, py, color="#ffffff", linewidth=1.6,
+                             marker="o", markersize=3, zorder=6)
+
+            _step_line(bb, sh)   # up chunk: breakout -> swing high
+            _step_line(sh, sl)   # down chunk: swing high -> swing low
             axv.set_ylim(0, ymax * 1.18)
-            ax.set_title(f"{symbol} - {interval} - BASE BREAKOUT "
+            cat_en = {"fresh": "FRESH BREAKOUT", "retest": "RETEST",
+                      "confirmed": "CONFIRMED"}.get(
+                          str(det.get("category") or ""), "BASE BREAKOUT")
+            ax.set_title(f"{symbol} - {interval} - {cat_en} "
                          f"{bprice:.2f} (zone {zlo:.2f}-{zup:.2f})",
                          color="#ffffff")
         else:
@@ -464,8 +517,9 @@ def _row_to_scan(row: sqlite3.Row) -> Dict:
         "last_results": json.loads(
             (row["last_results_json"] if "last_results_json" in row.keys()
              else None) or "[]"),
-        # Symbols already Telegram-notified during the current/last pass —
-        # the streaming notifier's crash-safe dedupe record.
+        # Match keys ("SYM|category" or bare symbols) already Telegram-
+        # notified during the current/last pass — the streaming
+        # notifier's crash-safe dedupe record.
         "notified": json.loads(
             (row["notified_json"] if "notified_json" in row.keys()
              else None) or "[]"),
@@ -555,14 +609,17 @@ def db_scan_touch(scan_id: int, matches: List[str],
         conn.commit()
 
 
-def db_scan_set_notified(scan_id: int, symbols: List[str]) -> None:
-    """Persist the set of symbols already notified during the current
-    scheduled pass (crash-safe dedupe for the streaming notifier)."""
+def db_scan_set_notified(scan_id: int, keys: List[str]) -> None:
+    """Persist the set of match keys already notified during the current
+    scheduled pass (crash-safe dedupe for the streaming notifier). Keys
+    are "SYM|category" for Base Breakout matches, bare symbols for
+    detail-less codes; legacy rows may hold plain symbol lists, which
+    the next pass simply overwrites."""
     conn = _get_db()
     with _db_lock:
         conn.execute(
             "UPDATE scans SET notified_json = ? WHERE id = ?",
-            (json.dumps(symbols or []), scan_id),
+            (json.dumps(keys or []), scan_id),
         )
         conn.commit()
 
@@ -1439,6 +1496,21 @@ def _notify_line(s: Dict, by_sym: Dict, sym: str) -> str:
     return line
 
 
+_CAT_HE = {"fresh": "פריצה טריה", "retest": "בבדיקת תמיכה",
+           "confirmed": "פריצת בסיס מאושרת"}
+
+
+def _match_key(r: Dict) -> str:
+    """Dedupe key for one match: "SYM|category" when the result carries
+    a Base Breakout category (so a category transition, e.g. fresh ->
+    confirmed, notifies again); the bare symbol for detail-less scan
+    codes (legacy behaviour)."""
+    sym = str(r.get("symbol") or "")
+    det = r.get("details")
+    cat = det.get("category") if isinstance(det, dict) else None
+    return f"{sym}|{cat}" if cat else sym
+
+
 def _notify_caption(s: Dict, by_sym: Dict, sym: str) -> str:
     """Photo caption for one new match (rich BASE_BO details when present)."""
     r = by_sym.get(sym, {})
@@ -1447,16 +1519,31 @@ def _notify_caption(s: Dict, by_sym: Dict, sym: str) -> str:
     det = r.get("details")
     if not isinstance(det, dict):
         return head
+    cat_he = _CAT_HE.get(str(det.get("category") or ""),
+                         "פריצת בסיס מאושרת")
     extra = (
-        f"\n🎯 פריצת בסיס מאושרת ({escape_md(str(det.get('interval') or s['interval']))})"
+        f"\n🎯 {cat_he} ({escape_md(str(det.get('interval') or s['interval']))})"
         f"\nמחיר פריצה: ${float(det.get('breakout_price') or 0):.2f}"
         f" (אזור: {float(det.get('zone_low') or 0):.2f}-{float(det.get('zone_high') or 0):.2f})"
         f"\n📊 ווליום פריצה: {_fmt_vol(det.get('breakout_volume'))}"
-        f" מול ממוצע 50: {_fmt_vol(det.get('vol_avg50'))}"
-        f" (פי {float(det.get('vol_ratio') or 0):.2f})"
-        f"\n📉 ווליום מוכרים בבדיקה: {_fmt_vol(det.get('seller_vol_mean'))}"
-        f" ({float(det.get('seller_vs_breakout') or 0) * 100:.0f}% מהפריצה,"
-        f" שיפוע {float(det.get('seller_vol_slope') or 0):+.0f})")
+        f" מול הנר הקודם: {_fmt_vol(det.get('prev_candle_volume'))}"
+        f" (ממוצע 50: {_fmt_vol(det.get('vol_avg50'))}"
+        f", פי {float(det.get('vol_ratio') or 0):.2f})")
+    if det.get("swing_high_price") is not None \
+            and det.get("swing_low_price") is not None:
+        extra += (
+            f"\nסווינג היי: ${float(det['swing_high_price']):.2f}"
+            f" · סווינג לואו: ${float(det['swing_low_price']):.2f}")
+    if det.get("category") == "confirmed":
+        extra += (
+            f"\n✅ נר אישור: ווליום {_fmt_vol(det.get('trigger_volume'))}"
+            f" מעל נר השפל {_fmt_vol(det.get('low_candle_volume'))}")
+    elif det.get("category") == "retest":
+        extra += (
+            f"\nמדרגות ווליום: עליה "
+            f"{'תקינה' if det.get('up_steps_ok') else 'לא תקינה'}"
+            f" · ירידה "
+            f"{'תקינה' if det.get('down_steps_ok') else 'לא תקינה'}")
     return head + extra
 
 
@@ -1498,15 +1585,18 @@ def _execute_scheduled_scan(s: Dict) -> None:
     - after every chunk, matches found SO FAR are persisted via
       db_scan_touch, so the terminal findings panel updates in near-real
       time during a long pass (the final touch writes the complete pass);
-    - NEW matches (not in the previous completed pass's match set, not
-      already notified earlier in this pass) are Telegram-notified per
-      chunk, as they are found. The notified set is persisted to the scan
-      row (notified_json) after every batch, and the incremental
-      last_matches writes double as crash protection: if the process dies
-      mid-pass, the next pass's "previous matches" already include every
-      symbol that was notified, so it is not notified twice. A symbol
-      that stays matched across passes is notified once, on the first
-      pass where it appears.
+    - NEW matches are Telegram-notified per chunk, as they are found.
+      "New" is judged by dedupe KEY (see _match_key): "SYM|category"
+      for Base Breakout matches, compared against the keys of the
+      previous completed pass's last_results - read from this pre-pass
+      snapshot BEFORE any chunk write overwrites them. A category
+      transition (fresh -> retest -> confirmed) is a new key and
+      notifies again; the same symbol in the same category does not.
+      The notified key set is persisted to the scan row (notified_json)
+      after every batch, and the incremental last_matches writes double
+      as crash protection: if the process dies mid-pass, the next pass's
+      "previous matches" already include every match that was notified,
+      so it is not notified twice.
     - the first ever pass is a baseline: it streams results into
       last_results but notifies nothing.
     """
@@ -1522,7 +1612,8 @@ def _execute_scheduled_scan(s: Dict) -> None:
         logger.exception("scheduled scan #%d failed", s["id"])
         return
 
-    prev_matches = set(s.get("last_matches") or [])
+    prev_keys = {_match_key(r) for r in (s.get("last_results") or [])
+                 if isinstance(r, dict) and r.get("symbol")}
     notified: set = set()
     try:
         db_scan_set_notified(s["id"], [])
@@ -1542,11 +1633,12 @@ def _execute_scheduled_scan(s: Dict) -> None:
             sym = e["symbol"]
             acc_matched.append(sym)
             if (not first_run and telegram_ok
-                    and sym not in prev_matches and sym not in notified):
+                    and _match_key(e) not in prev_keys
+                    and _match_key(e) not in notified):
                 fresh.append(e)
         if fresh:
             _notify_scan_matches(s, fresh)
-            notified.update(e["symbol"] for e in fresh)
+            notified.update(_match_key(e) for e in fresh)
             try:
                 db_scan_set_notified(s["id"], sorted(notified))
             except Exception:

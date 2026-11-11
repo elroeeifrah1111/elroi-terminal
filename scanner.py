@@ -1561,15 +1561,23 @@ PY_BASEBO_INDICATOR_EXAMPLE = '''# =============================================
 #     להתנגדות ממושכת.
 #  2. התבססות ארוכה תחת האזור: 3+ תחתיות מעוגלות (U) בעומקים משתנים
 #     (U-ים מקוננים), הבודקות את ההתנגדות שוב ושוב (2+ דחיות).
-#  3. פריצה אמיתית: סגירה מעל האזור, בנר קונים, עם ווליום פריצה גבוה
-#     מממוצע הווליום של 50 הנרות שלפניו (מסנן ווליום קונים).
-#  4. אישור: התבססות מעל האזור + בדיקת האזור כתמיכה, כשווליום המוכרים
-#     דועך בבדיקה (אין היצע) -> סיגנל "BASE_BO".
+#  3. פריצה אמיתית: סגירה מעל האזור כשווליום נר הפריצה גבוה מהווליום
+#     של הנר הקודם בלבד (זה השער היחיד; ממוצע 50 הוא רק מספר רקע).
+#  4. מבנה אחרי הפריצה, בשני צ'אנקים של ווליום במדרגות (דחיסה לכ-5
+#     מדרגות, סכום בכל מדרגה): צ'אנק עליה מהפריצה עד הסווינג היי חייב
+#     להיות במגמת עליה (כל מדרגה גבוהה מקודמתה), וצ'אנק הירידה
+#     מהסווינג היי עד הסווינג לואו (שנשאר מעל תחתית האזור) חייב להיות
+#     במגמת ירידה (כל מדרגה נמוכה מקודמתה).
+#  5. אישור: נר קונים ראשון אחרי הסווינג לואו עם ווליום גבוה מווליום
+#     נר הסווינג לואו עצמו -> סיגנל "BASE_BO".
+# קטגוריות ב-details: "fresh" (פריצה טריה), "retest" (בבדיקת תמיכה /
+# מדשדשת), "confirmed" (אחרי נר האישור). סדרות מצב BASE_FRESH /
+# BASE_RETEST מסמנות 1.0 בבר שבו הקטגוריה מתחילה.
 # בנפרד (טרייד אחר, מתויג בנפרד): זיהוי C&H קלאסי ("C&H" / "C&H BO").
 #
 # indicator(df) — df עם נרות (time/open/high/low/close/volume).
 # markers: "BASE_WATCH" (בסיס נבנה, עוד אין פריצה), "Breakout" (פריצה),
-#          "BASE_BO" (הטרייד: פריצה + בדיקת תמיכה עם ווליום מוכרים דועך),
+#          "BASE_BO" (הטרייד: פריצה + צ'אנקי סווינג + נר אישור),
 #          "Round" (תחתית מעוגלת), "C&H" / "C&H BO" (טרייד אחר).
 # זמינים: ta.* (sma/ema/atr/lowest/highest), pd, np, SYMBOL, INTERVAL.
 # =====================================================================
@@ -1582,10 +1590,8 @@ MIN_SUP_TOUCHES  = 1      # נגיעות תמיכה לפני השבירה (מי�
 MIN_RES_RETESTS  = 2      # דחיות מההתנגדות אחרי ההיפוך
 MIN_ROUNDS       = 3      # תחתיות מעוגלות תחת האזור
 MIN_BASE_BARS    = 60     # אורך בסיס מינימלי (נרות) — "ארוך יחסית לטיים-פריים"
-POST_BO_BARS     = 20     # חלון לבדיקת תמיכה אחרי פריצה
-MIN_RETEST_BARS  = 3      # מינימום נרות התבססות לפני בדיקת תמיכה
-BO_VOL_AVG_LEN   = 50     # חלון ממוצע הווליום להשוואת ווליום הפריצה
-BO_VOL_MIN_RATIO = 1.0    # ווליום הפריצה חייב לעבור את הממוצע כפול יחס זה
+BO_VOL_AVG_LEN   = 50     # חלון ממוצע ווליום - מספר רקע בלבד, לא שער
+STEPS_TARGET     = 5      # מספר מדרגות יעד בדחיסת ווליום של צ'אנק
 TREND_LEN        = 34
 LOOKBACK         = 500
 MAX_ZONES        = 30
@@ -1630,6 +1636,31 @@ def _pivot_series(h, l, left, right):
     return ph, pl
 
 
+def _vol_steps(seg):
+    """דחיסת סדרת ווליום של צ'אנק לכ- STEPS_TARGET מדרגות: רוחב מדרגה
+    max(1, ceil(L/5)), ערך מדרגה = סכום הווליומים בקבוצה שלה.
+    מחזיר רשימת סכומים, [] לצ'אנק ריק, או None אם יש NaN בצ'אנק."""
+    import numpy as np
+    seg = np.asarray(seg, dtype=float)
+    L = len(seg)
+    if L == 0:
+        return []
+    if np.isnan(seg).any():
+        return None
+    w = max(1, -(-L // STEPS_TARGET))
+    return [float(np.sum(seg[i:i + w])) for i in range(0, L, w)]
+
+
+def _steps_trend(steps, up):
+    """מגמת מדרגות קפדנית: כל מדרגה גבוהה/נמוכה מקודמתה, בלי יוצאים.
+    פחות מ-2 מדרגות (או NaN שסומן ב-None) = אין מגמה."""
+    if not steps or len(steps) < 2:
+        return False
+    if up:
+        return all(steps[k] > steps[k - 1] for k in range(1, len(steps)))
+    return all(steps[k] < steps[k - 1] for k in range(1, len(steps)))
+
+
 def _bb_new_zone(center, width, pbar, is_sup, downtrend):
     return {
         "center": center, "width": width, "touches": 1,
@@ -1639,6 +1670,13 @@ def _bb_new_zone(center, width, pbar, is_sup, downtrend):
         "broken": False, "break_bar": None, "retests": 0,
         "bo_bar": None, "bo_done": False, "bo_dead": False,
         "watch_fired": False, "bo_vol_ok": False, "bo_vol_avg": 0.0,
+        "bo_zlo": None, "bo_zup": None, "bo_prev_vol": None,
+        "swing_high_bar": None, "swing_high_price": None,
+        "swing_low_bar": None, "swing_low_price": None,
+        "up_steps": [], "down_steps": [],
+        "up_steps_ok": False, "down_steps_ok": False,
+        "trigger_bar": None, "struct_dead": False, "cat": None,
+        "_steps_key": None,
     }
 
 
@@ -1681,8 +1719,11 @@ def indicator(df):
             seen.add(key)
             markers.append({"bar": int(bar), "side": side, "text": text})
 
-    # פרטי ה-BASE_BO האחרון שירה + האזור האחרון שהגיע לפריצה (לסימוני גרף)
-    _bo_state = {"details": None, "chart_zone": None}
+    # פרטי הסטאפ הפעיל האחרון + האזור האחרון שהגיע לפריצה (לסימוני גרף)
+    _bo_state = {"details": None, "chart_zone": None, "owner": None}
+    # סדרות מצב: 1.0 בבר שבו קטגוריה מתחילה (None בשאר הברים)
+    _fresh_series = [None] * n
+    _retest_series = [None] * n
 
     def _bar_date(bar):
         try:
@@ -1700,6 +1741,92 @@ def indicator(df):
     def _pv(segment, price_dir, side, vol_trend, reading, line):
         return {"segment": segment, "price_dir": price_dir, "side": side,
                 "vol_trend": vol_trend, "reading": reading, "line": line}
+
+    def _fv(v):
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return "-"
+        if v != v:  # NaN
+            return "-"
+        return f"{v:,.0f}"
+
+    def _bb_details(z, zlo, zup, cat):
+        """בניית ה-details של הסטאפ הפעיל (כל קטגוריה) מהמצב הנוכחי."""
+        bb = z["bo_bar"]
+        sh, sl, tb = (z["swing_high_bar"], z["swing_low_bar"],
+                      z["trigger_bar"])
+        _bv = float(vol[bb])
+        _pvv = (float(vol[bb - 1]) if bb > 0 else float("nan"))
+        _avg = z.get("bo_vol_avg")
+        _avg = float(_avg) if _avg is not None else float("nan")
+        _avg_ok = _avg == _avg and _avg > 0
+        corr = [
+            _pv("breakout", "up", "buyers", "up", "bullish",
+                "ווליום פריצה " + _fv(_bv) + " מעל הנר הקודם " + _fv(_pvv)),
+        ]
+        if sh is not None and sh == bb:
+            corr.append(_pv("rise", "up", "buyers", "up", "bullish",
+                            "צ'אנק עליה: נר הפריצה הוא גם הסווינג היי - "
+                            "אין צ'אנק נפרד"))
+        elif z["up_steps_ok"]:
+            corr.append(_pv("rise", "up", "buyers", "up", "bullish",
+                            "צ'אנק עליה: ווליום עולה במדרגות"))
+        else:
+            corr.append(_pv("rise", "up", "buyers", "up", "bearish",
+                            "צ'אנק עליה: ווליום לא עולה במדרגות"))
+        if sl is not None:
+            if z["down_steps_ok"]:
+                corr.append(_pv("retest", "down", "sellers", "down",
+                                "bullish",
+                                "צ'אנק בדיקה: ווליום יורד במדרגות"))
+            else:
+                corr.append(_pv("retest", "down", "sellers", "down",
+                                "bearish",
+                                "צ'אנק בדיקה: ווליום לא יורד במדרגות"))
+        if tb is not None:
+            corr.append(_pv("trigger", "up", "buyers", "up", "bullish",
+                            "נר אישור: ווליום " + _fv(vol[tb])
+                            + " מעל נר השפל " + _fv(vol[sl])))
+        return {
+            "category": cat,
+            "zone_low": round(float(zlo), 4),
+            "zone_high": round(float(zup), 4),
+            "zone_break_bar": int(z["break_bar"]),
+            "breakout_bar": int(bb),
+            "breakout_date": _bar_date(bb),
+            "breakout_price": round(float(close[bb]), 4),
+            "breakout_volume": _bv,
+            "prev_candle_volume": (_pvv if _pvv == _pvv else None),
+            "vol_avg50": (round(_avg, 2) if _avg_ok else None),
+            "vol_ratio": (round(_bv / _avg, 3) if _avg_ok else 0.0),
+            "vol_window_start": int(max(0, bb - BO_VOL_AVG_LEN)),
+            "swing_high_bar": (int(sh) if sh is not None else None),
+            "swing_high_price": (round(float(high[sh]), 4)
+                                 if sh is not None else None),
+            "swing_low_bar": (int(sl) if sl is not None else None),
+            "swing_low_price": (round(float(low[sl]), 4)
+                                if sl is not None else None),
+            "low_candle_volume": (float(vol[sl])
+                                  if sl is not None else None),
+            "up_steps": [round(float(x), 2) for x in (z["up_steps"] or [])],
+            "down_steps": [round(float(x), 2)
+                           for x in (z["down_steps"] or [])],
+            "up_steps_ok": bool(z["up_steps_ok"]),
+            "down_steps_ok": bool(z["down_steps_ok"]),
+            "trigger_bar": (int(tb) if tb is not None else None),
+            "trigger_date": (_bar_date(tb) if tb is not None else None),
+            "trigger_price": (round(float(close[tb]), 4)
+                              if tb is not None else None),
+            "trigger_volume": (float(vol[tb])
+                               if tb is not None else None),
+            "confirm_bar": (int(tb) if tb is not None else None),
+            "retest_start_bar": (int(sh) if sh is not None else int(bb) + 1),
+            "retest_end_bar": int(tb if tb is not None
+                                  else (sl if sl is not None else bb)),
+            "interval": str(INTERVAL),
+            "correlation": corr,
+        }
 
     zones = []
     round_events = []  # (bar, trough_price)
@@ -1783,79 +1910,120 @@ def indicator(df):
             if (z["bo_bar"] is None and base_ready
                     and i > 0 and close[i] > zup and close[i - 1] <= zup):
                 z["bo_bar"] = i
-                # מסנן ווליום קונים בפריצה: נר קונים (close>open) + ווליום
-                # הפריצה מעל ממוצע הווליום של BO_VOL_AVG_LEN הנרות שלפניו.
-                # ווליום חסר (NaN) או היסטוריה חסרה = לא עובר.
+                # שער הפריצה היחיד: ווליום נר הפריצה גבוה מהווליום של
+                # הנר הקודם (קפדני). ממוצע BO_VOL_AVG_LEN הנרות שלפניו
+                # מחושב כמספר רקע בלבד (vol_avg50 / vol_ratio בפרטים).
+                # ווליום חסר (NaN) באחד משני הנרות = לא עובר.
                 _bv = vol[i]
+                _pvv = vol[i - 1]
                 _prev = vol[max(0, i - BO_VOL_AVG_LEN):i]
                 _prev = _prev[~np.isnan(_prev)]
                 z["bo_vol_avg"] = (float(np.mean(_prev))
                                    if len(_prev) else float("nan"))
+                z["bo_prev_vol"] = float(_pvv)
                 z["bo_vol_ok"] = bool(
-                    close[i] > op[i]
-                    and not np.isnan(_bv)
-                    and len(_prev) > 0
-                    and float(np.mean(_prev)) > 0
-                    and float(_bv) > float(np.mean(_prev)) * BO_VOL_MIN_RATIO)
+                    not np.isnan(_bv) and not np.isnan(_pvv)
+                    and float(_bv) > float(_pvv))
+                # גבולות האזור מוקפאים כפי שסומנו ברגע הפריצה.
+                z["bo_zlo"] = float(zlo)
+                z["bo_zup"] = float(zup)
                 if z["bo_vol_ok"]:
                     _bo_state["chart_zone"] = (float(zlo), float(zup),
                                                float(close[i]))
+                    z["swing_high_bar"] = i
+                    z["swing_high_price"] = float(high[i])
                 if SHOW_SIGNALS and z["bo_vol_ok"]:
                     _mark(i, "buy", "Breakout")
             bb = z["bo_bar"]
-            if bb is not None and not z["bo_done"] and not z["bo_dead"]:
-                if close[i] < zlo:
+            if bb is not None and not z["bo_dead"]:
+                bzlo, bzup = z["bo_zlo"], z["bo_zup"]
+                if close[i] < bzlo:
+                    # מוות: סגירה מתחת לתחתית האזור שסומן בפריצה.
                     z["bo_dead"] = True
-                elif MIN_RETEST_BARS <= i - bb <= POST_BO_BARS:
-                    if low[i] <= zup and close[i] >= zlo:
-                        s0, s1 = bb + 1, i + 1
-                        sv = vol[s0:s1]
-                        scls = close[s0:s1]
-                        sopn = op[s0:s1]
-                        valid = ~np.isnan(sv)
-                        seller = valid & (scls < sopn)
-                        if int(np.sum(seller)) >= 2:
-                            svv = sv[seller]
-                            xs = np.arange(len(svv), dtype=float)
-                            slope = float(np.polyfit(xs, svv, 1)[0])
-                            bo_vol = vol[bb]
-                            weaker = (not np.isnan(bo_vol)
-                                      and float(np.mean(svv)) < float(bo_vol))
-                            if slope < 0 and weaker and z["bo_vol_ok"]:
+                    z["cat"] = None
+                    if _bo_state.get("owner") is z:
+                        _bo_state["details"] = None
+                        _bo_state["owner"] = None
+                elif z["bo_vol_ok"] and not z["struct_dead"]:
+                    if not z["bo_done"]:
+                        # --- מעקב סווינג היי (מהפריצה ואילך) ---
+                        if i > bb and high[i] > z["swing_high_price"]:
+                            z["swing_high_bar"] = i
+                            z["swing_high_price"] = float(high[i])
+                            # לואו חייב לבוא אחרי הסווינג היי הנוכחי.
+                            z["swing_low_bar"] = None
+                            z["swing_low_price"] = None
+                        # --- מעקב סווינג לואו (אחרי הסווינג היי) ---
+                        if (z["swing_high_bar"] is not None
+                                and i > z["swing_high_bar"]):
+                            if (z["swing_low_bar"] is None
+                                    or low[i] < z["swing_low_price"]):
+                                z["swing_low_bar"] = i
+                                z["swing_low_price"] = float(low[i])
+                                if z["swing_low_price"] < bzlo:
+                                    # שפל מתחת לתחתית האזור - מבנה פסול.
+                                    z["struct_dead"] = True
+                        if not z["struct_dead"]:
+                            # --- מדרגות ווליום (חישוב מחדש רק כשהצ'אנק
+                            # השתנה: קצוות הצ'אנקים הם ברי הסווינג) ---
+                            _key = (z["swing_high_bar"],
+                                    z["swing_low_bar"])
+                            if _key != z["_steps_key"]:
+                                z["_steps_key"] = _key
+                                _ush = _vol_steps(
+                                    vol[bb:z["swing_high_bar"] + 1])
+                                z["up_steps"] = _ush or []
+                                # צ'אנק עליה באורך 1 (הפריצה היא גם
+                                # הסווינג היי) תקין מכוח שער הפריצה.
+                                z["up_steps_ok"] = (
+                                    True if z["swing_high_bar"] == bb
+                                    else _steps_trend(_ush, True))
+                                if z["swing_low_bar"] is not None:
+                                    _dsh = _vol_steps(
+                                        vol[z["swing_high_bar"]:
+                                            z["swing_low_bar"] + 1])
+                                    z["down_steps"] = _dsh or []
+                                    z["down_steps_ok"] = _steps_trend(
+                                        _dsh, False)
+                                else:
+                                    z["down_steps"] = []
+                                    z["down_steps_ok"] = False
+                            # --- נר אישור: ירוק ראשון אחרי הסווינג לואו
+                            # עם ווליום מעל ווליום נר הסווינג לואו ---
+                            _sl = z["swing_low_bar"]
+                            if (_sl is not None and i > _sl
+                                    and close[i] > op[i]
+                                    and not np.isnan(vol[i])
+                                    and not np.isnan(vol[_sl])
+                                    and float(vol[i]) > float(vol[_sl])
+                                    and z["up_steps_ok"]
+                                    and z["down_steps_ok"]):
                                 z["bo_done"] = True
-                                _mark(i, "buy", "BASE_BO")
-                                _avg = float(z.get("bo_vol_avg") or 0.0)
-                                _bv2 = float(bo_vol)
-                                _smean = float(np.mean(svv))
-                                _bo_state["details"] = {
-                                    "zone_low": round(float(zlo), 4),
-                                    "zone_high": round(float(zup), 4),
-                                    "zone_break_bar": int(z["break_bar"]),
-                                    "breakout_bar": int(bb),
-                                    "breakout_date": _bar_date(bb),
-                                    "breakout_price": round(float(close[bb]), 4),
-                                    "breakout_volume": _bv2,
-                                    "vol_avg50": round(_avg, 2),
-                                    "vol_ratio": (round(_bv2 / _avg, 3)
-                                                  if _avg > 0 else 0.0),
-                                    "vol_window_start": int(max(0, bb - BO_VOL_AVG_LEN)),
-                                    "retest_start_bar": int(bb + 1),
-                                    "retest_end_bar": int(i),
-                                    "confirm_bar": int(i),
-                                    "seller_vol_mean": round(_smean, 2),
-                                    "seller_vol_slope": round(float(slope), 2),
-                                    "seller_vs_breakout": (round(_smean / _bv2, 3)
-                                                           if _bv2 > 0 else 0.0),
-                                    "interval": str(INTERVAL),
-                                    "correlation": [
-                                        _pv("breakout", "up", "buyers", "up",
-                                            "bullish",
-                                            "פריצה: מחיר עולה, ווליום קונים עולה - שורי"),
-                                        _pv("retest", "down", "sellers", "down",
-                                            "bullish",
-                                            "בדיקת תמיכה: מחיר בודק את האזור, ווליום מוכרים יורד - שורי (המוכרים נחלשים)"),
-                                    ],
-                                }
+                                z["trigger_bar"] = i
+                                if SHOW_SIGNALS:
+                                    _mark(i, "buy", "BASE_BO")
+                    # --- קטגוריה + צילום פרטים של הסטאפ הפעיל ---
+                    if z["struct_dead"]:
+                        z["cat"] = None
+                        if _bo_state.get("owner") is z:
+                            _bo_state["details"] = None
+                            _bo_state["owner"] = None
+                    else:
+                        if z["bo_done"]:
+                            _cat = "confirmed"
+                        elif z["swing_low_bar"] is not None:
+                            _cat = "retest"
+                        else:
+                            _cat = "fresh"
+                        if _cat != z["cat"]:
+                            z["cat"] = _cat
+                            if _cat == "fresh":
+                                _fresh_series[i] = 1.0
+                            elif _cat == "retest":
+                                _retest_series[i] = 1.0
+                        _bo_state["owner"] = z
+                        _bo_state["details"] = _bb_details(
+                            z, bzlo, bzup, _cat)
 
         # ---------- תחתית מעוגלת (פרבולה + קוסינוס, רב-סקאלה) ----------
         # סורק את כל ההיסטוריה בחלונות בגדלים שונים — תופס U קצר וארוך
@@ -1973,7 +2141,9 @@ def indicator(df):
                 if SHOW_SIGNALS:
                     _mark(i, "buy", "C&H BO")
 
-    _out = {"markers": markers}
+    _out = {"markers": markers,
+            "BASE_FRESH": _fresh_series,
+            "BASE_RETEST": _retest_series}
     if _bo_state.get("details") is not None:
         _out["details"] = _bo_state["details"]
     _cz = _bo_state.get("chart_zone")
@@ -1997,26 +2167,51 @@ def indicator(df):
 PY_BASEBO_SCAN_EXAMPLE = (PY_BASEBO_INDICATOR_EXAMPLE + '''
 
 # ================= עטיפת סריקה =================
-# signal=True אם BASE_BO / BASE_WATCH / Breakout / C&H / C&H BO
-# אותרו ב-3 הנרות האחרונים.
-# משקלים: BASE_BO (הטרייד של אלרואי) גבוה ביותר; C&H מתויג בנפרד (טרייד אחר).
+# signal=True אם המניה כעת באחת מקטגוריות פריצת הבסיס (לפי חלונות
+# האירוע) או אם דפוס אחר (BASE_WATCH / C&H / C&H BO / Round) אותר
+# ב-3 הנרות האחרונים.
+# חלונות אירוע: fresh - נר הפריצה בתוך 5 הנרות האחרונים;
+# retest - הסווינג לואו בתוך 15 הנרות האחרונים או שהקטגוריה פעילה כעת;
+# confirmed - נר האישור בתוך 5 הנרות האחרונים.
+# משקלים: confirmed (הטרייד של אלרואי) גבוה ביותר; C&H מתויג בנפרד.
 def scan(df):
     out = indicator(df)
     markers = out.get("markers") or []
     n = len(df)
+    last = n - 1
     recent = [m for m in markers
               if isinstance(m, dict) and m.get("bar", -1) >= n - 3]
-    if not recent:
+    det = out.get("details")
+    det = det if isinstance(det, dict) else None
+    cat = det.get("category") if det else None
+    base_hit, base_score, base_note = False, 0.0, ""
+    if det and cat == "fresh" \\
+            and last - int(det.get("breakout_bar") or 0) <= 4:
+        base_hit, base_score, base_note = True, 2.0, "פריצה טריה"
+    elif det and cat == "retest":
+        # חלון האירוע: סווינג לואו בתוך 15 נרות - או שהקטגוריה פעילה
+        # כעת (ה-details הם מצב הבר האחרון, אז זה מתקיים מעצם ההגדרה).
+        base_hit, base_score, base_note = \\
+            True, 2.5, "פריצת בסיס בבדיקת תמיכה"
+    elif det and cat == "confirmed" and det.get("trigger_bar") is not None \\
+            and last - int(det["trigger_bar"]) <= 4:
+        base_hit, base_score, base_note = True, 3.0, "פריצת בסיס מאושרת"
+    if not recent and not base_hit:
         return {"signal": False, "score": 0.0, "note": ""}
     weights = {"BASE_BO": 3.0, "BASE_WATCH": 2.0, "C&H BO": 1.5,
                "Breakout": 1.0, "C&H": 1.0, "Round": 0.5}
     names = sorted({str(m.get("text", "?")) for m in recent})
-    score = max([weights.get(t, 0.5) for t in names])
+    score = max([weights.get(t, 0.5) for t in names] + [base_score])
+    parts = []
+    if base_hit:
+        parts.append(base_note)
+    if names:
+        parts.append("דפוסים ב-3 נרות אחרונים: " + ", ".join(names))
     res = {"signal": True,
            "score": float(score),
-           "note": "דפוסים ב-3 נרות אחרונים: " + ", ".join(names)}
-    # פרטים מובנים של הטרייד - רק כשה-BASE_BO עצמו טרי (הפרטים שייכים אליו)
-    if "BASE_BO" in names and isinstance(out.get("details"), dict):
-        res["details"] = out["details"]
+           "note": " · ".join(parts)}
+    # פרטים מובנים של הסטאפ - מצורפים כשהקטגוריה עצמה היא האירוע
+    if base_hit:
+        res["details"] = det
     return res
 ''')

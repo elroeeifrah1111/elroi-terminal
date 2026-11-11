@@ -356,29 +356,53 @@
     }
   }
 
+  const BB_CAT_GROUPS = [
+    { key: "confirmed", title: "🎯 מאושרות" },
+    { key: "retest", title: "🟡 בבדיקת תמיכה / מדשדשות" },
+    { key: "fresh", title: "🟢 פריצות טריות" },
+    { key: "", title: "📌 ממצאים נוספים" },
+  ];
+  const BB_CAT_HE = { confirmed: "מאושרת", retest: "בבדיקת תמיכה",
+                      fresh: "פריצה טריה" };
+
   function renderBaseboFindings() {
     const box = $("bb-findings");
     if (!bbFindings.length) {
-      box.innerHTML = '<div class="sc-note">אין ממצאים עדיין — הסריקה המתוזמנת תמלא את הרשימה בריצה הבאה</div>';
+      box.innerHTML = '<div class="sc-note">אין ממצאים עדיין - הסריקה המתוזמנת תמלא את הרשימה בריצה הבאה</div>';
       return;
     }
-    box.innerHTML = bbFindings.map((f, i) => {
+    const rowHtml = (f, i) => {
       const chg = (f.change_pct == null || f.change_pct === "") ? "" :
         '<span class="sc-chg ' + (f.change_pct >= 0 ? "up" : "down") + '">' +
         (f.change_pct >= 0 ? "+" : "") + f.change_pct + "%</span>";
       const det = f.details || {};
+      const catTag = det.category
+        ? '<span class="sc-note">[' + esc(BB_CAT_HE[det.category] || det.category) + "]</span>" : "";
       const bo = det.breakout_price != null
         ? '<span class="sc-note">פריצה: ' + fmtPrice(det.breakout_price) +
-          (det.zone_low != null ? " · אזור " + fmtPrice(det.zone_low) + "–" + fmtPrice(det.zone_high) : "") +
+          (det.zone_low != null ? " · אזור " + fmtPrice(det.zone_low) + "-" + fmtPrice(det.zone_high) : "") +
           (det.vol_ratio ? " · ווליום ×" + det.vol_ratio : "") + "</span>" : "";
       const tv = "https://www.tradingview.com/chart/?symbol=" + encodeURIComponent(f.symbol);
       return '<div class="sc-row">🎯 ' +
         '<span class="sc-sym" data-bb="' + i + '">' + esc(f.symbol) + "</span>" +
-        '<span class="sc-price">' + (f.price != null ? fmtPrice(f.price) : "—") + "</span>" + chg +
-        '<span class="sc-note">' + esc(f.interval) + "</span>" + bo +
+        '<span class="sc-price">' + (f.price != null ? fmtPrice(f.price) : "-") + "</span>" + chg +
+        '<span class="sc-note">' + esc(f.interval) + "</span>" + catTag + bo +
         '<button class="tb-btn" data-bbchart="' + i + '" title="פתח גרף עם סימוני פריצת בסיס">📈 גרף</button>' +
         '<a class="tb-btn" href="' + tv + '" target="_blank" rel="noopener" title="TradingView">TV</a></div>';
-    }).join("");
+    };
+    let html = "";
+    BB_CAT_GROUPS.forEach(g => {
+      const idxs = [];
+      bbFindings.forEach((f, i) => {
+        const cat = (f.details && f.details.category) || "";
+        if (cat === g.key) idxs.push(i);
+      });
+      if (!idxs.length) return;
+      html += '<div style="font-weight:bold;padding:10px 4px 2px">' +
+        g.title + " (" + idxs.length + ")</div>";
+      html += idxs.map(i => rowHtml(bbFindings[i], i)).join("");
+    });
+    box.innerHTML = html;
     box.querySelectorAll("[data-bb]").forEach(el =>
       el.addEventListener("click", () => openBaseboChart(bbFindings[Number(el.dataset.bb)])));
     box.querySelectorAll("[data-bbchart]").forEach(el =>
