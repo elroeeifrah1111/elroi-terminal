@@ -59,7 +59,9 @@ DOWNLOAD_WORKERS = 2       # parallel chunk downloads (512MB instance)
 PER_SYMBOL_TIMEOUT = 60    # wall-clock seconds per symbol (child is killed after)
 SCAN_WORKERS = 2           # concurrent sandbox child processes (512MB instance)
 SCAN_CHILD_MEM_HEADROOM = 768 * 1024 * 1024  # extra address space per child
-MAX_SYMBOLS_INTRADAY = 2000  # safety cap for intraday batch scans
+# No cap on the number of symbols per scan, at any interval — large
+# universes run through the chunked/async machinery; protection is the
+# per-symbol timeout and chunk sizes, never the universe size.
 
 
 # =====================================================================
@@ -399,11 +401,13 @@ def _normalize_indicator(raw: Any, base: Dict[str, Any], n: int) -> Dict[str, An
         return base
     plots: Dict[str, List[Optional[float]]] = {}
     for name, vals in raw.items():
-        if name == "markers":
+        if name in ("markers", "hlines", "details"):
             continue
         if len(plots) >= 20:
             break
-        sname = str(name)[:40]
+        sname = str(name)[:48]
+        if isinstance(vals, dict):
+            continue
         try:
             s = pd.Series(vals)
         except Exception:
@@ -436,6 +440,30 @@ def _normalize_indicator(raw: Any, base: Dict[str, Any], n: int) -> Dict[str, An
                                 "text": str(m.get("text", ""))[:30]})
     base["plots"] = plots
     base["markers"] = markers
+    # Optional chart extras: horizontal price lines (zone bounds, breakout
+    # price) and a structured details payload — both pass through untouched
+    # when the indicator does not provide them.
+    hlines: List[Dict[str, Any]] = []
+    hraw = raw.get("hlines")
+    if isinstance(hraw, list):
+        for h in hraw[:12]:
+            if not isinstance(h, dict):
+                continue
+            try:
+                price = float(h.get("price"))
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(price):
+                continue
+            hlines.append({"price": price,
+                           "color": str(h.get("color", "#787b86"))[:20],
+                           "title": str(h.get("title", ""))[:40]})
+    base["hlines"] = hlines
+    det = raw.get("details")
+    if isinstance(det, dict):
+        clean = _sanitize_details(det)
+        if clean:
+            base["details"] = clean
     return base
 
 
@@ -516,6 +544,28 @@ def _exec_python_one(code: str, symbol: str, interval: str,
     return _normalize_result(raw, base)
 
 
+def _sanitize_details(obj: Any, depth: int = 0) -> Any:
+    """Keep a scan() 'details' payload JSON-safe and bounded: only plain
+    dict/list/str/num/bool/None survive, floats are made finite, strings
+    and containers are truncated. Anything else is dropped (None)."""
+    if depth > 4:
+        return None
+    if obj is None or isinstance(obj, (bool, int, str)):
+        return obj[:300] if isinstance(obj, str) else obj
+    if isinstance(obj, float):
+        return round(obj, 6) if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in list(obj.items())[:40]:
+            sv = _sanitize_details(v, depth + 1)
+            if sv is not None:
+                out[str(k)[:40]] = sv
+        return out
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_details(v, depth + 1) for v in list(obj)[:40]]
+    return None
+
+
 def _normalize_result(raw: Any, base: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(raw, dict):
         sig = raw.get("signal", False)
@@ -526,6 +576,11 @@ def _normalize_result(raw: Any, base: Dict[str, Any]) -> Dict[str, Any]:
             base["score"] = 0.0
         note = raw.get("note", "")
         base["note"] = str(note)[:200] if note is not None else ""
+        det = raw.get("details")
+        if isinstance(det, dict):
+            clean = _sanitize_details(det)
+            if clean:
+                base["details"] = clean
     elif isinstance(raw, bool):
         base["signal"] = raw
     elif isinstance(raw, (int, float)):
@@ -894,11 +949,16 @@ def run_python_indicator(code: str, candles: List[Dict],
     r = results[0] if results else {}
     if r.get("error"):
         return {"plots": [], "markers": [], "error": r["error"]}
-    plots = [
-        {"name": name, "color": _INDICATOR_COLORS[i % len(_INDICATOR_COLORS)],
-         "values": vals}
-        for i, (name, vals) in enumerate((r.get("plots") or {}).items())
-    ]
+    plots = []
+    for i, (name, vals) in enumerate((r.get("plots") or {}).items()):
+        # A "VOL::" name prefix routes the plot to the volume pane
+        # (priceScaleId "vol-pane") instead of the price pane.
+        pane = ""
+        if name.startswith("VOL::"):
+            name, pane = name[5:], "vol"
+        plots.append({"name": name,
+                      "color": _INDICATOR_COLORS[i % len(_INDICATOR_COLORS)],
+                      "values": vals, "pane": pane})
     markers = []
     for m in r.get("markers") or []:
         t = candles[m["bar"]]["time"]
@@ -908,7 +968,11 @@ def run_python_indicator(code: str, candles: List[Dict],
         else:
             markers.append({"time": t, "position": "belowBar", "color": "#089981",
                             "shape": "arrowUp", "text": m["text"] or "Buy"})
-    return {"plots": plots, "markers": markers, "error": ""}
+    out: Dict[str, Any] = {"plots": plots, "markers": markers, "error": "",
+                           "hlines": r.get("hlines") or []}
+    if r.get("details"):
+        out["details"] = r["details"]
+    return out
 
 
 def run_python_strategy(code: str, candles: List[Dict], symbol: str = "",
@@ -1347,7 +1411,8 @@ PY_BASEBO_INDICATOR_EXAMPLE = '''# =============================================
 #     להתנגדות ממושכת.
 #  2. התבססות ארוכה תחת האזור: 3+ תחתיות מעוגלות (U) בעומקים משתנים
 #     (U-ים מקוננים), הבודקות את ההתנגדות שוב ושוב (2+ דחיות).
-#  3. פריצה אמיתית: סגירה מעל האזור.
+#  3. פריצה אמיתית: סגירה מעל האזור, בנר קונים, עם ווליום פריצה גבוה
+#     מממוצע הווליום של 50 הנרות שלפניו (מסנן ווליום קונים).
 #  4. אישור: התבססות מעל האזור + בדיקת האזור כתמיכה, כשווליום המוכרים
 #     דועך בבדיקה (אין היצע) -> סיגנל "BASE_BO".
 # בנפרד (טרייד אחר, מתויג בנפרד): זיהוי C&H קלאסי ("C&H" / "C&H BO").
@@ -1369,6 +1434,8 @@ MIN_ROUNDS       = 3      # תחתיות מעוגלות תחת האזור
 MIN_BASE_BARS    = 60     # אורך בסיס מינימלי (נרות) — "ארוך יחסית לטיים-פריים"
 POST_BO_BARS     = 20     # חלון לבדיקת תמיכה אחרי פריצה
 MIN_RETEST_BARS  = 3      # מינימום נרות התבססות לפני בדיקת תמיכה
+BO_VOL_AVG_LEN   = 50     # חלון ממוצע הווליום להשוואת ווליום הפריצה
+BO_VOL_MIN_RATIO = 1.0    # ווליום הפריצה חייב לעבור את הממוצע כפול יחס זה
 TREND_LEN        = 34
 LOOKBACK         = 500
 MAX_ZONES        = 30
@@ -1421,7 +1488,7 @@ def _bb_new_zone(center, width, pbar, is_sup, downtrend):
         "downtrend_origin": bool(is_sup and downtrend),
         "broken": False, "break_bar": None, "retests": 0,
         "bo_bar": None, "bo_done": False, "bo_dead": False,
-        "watch_fired": False,
+        "watch_fired": False, "bo_vol_ok": False, "bo_vol_avg": 0.0,
     }
 
 
@@ -1463,6 +1530,26 @@ def indicator(df):
         if key not in seen:
             seen.add(key)
             markers.append({"bar": int(bar), "side": side, "text": text})
+
+    # פרטי ה-BASE_BO האחרון שירה + האזור האחרון שהגיע לפריצה (לסימוני גרף)
+    _bo_state = {"details": None, "chart_zone": None}
+
+    def _bar_date(bar):
+        try:
+            if "time" in df.columns:
+                tv = df["time"].iloc[int(bar)]
+                try:
+                    return str(pd.to_datetime(float(tv), unit="s",
+                                              utc=True).date())
+                except Exception:
+                    return str(tv)[:10]
+        except Exception:
+            pass
+        return ""
+
+    def _pv(segment, price_dir, side, vol_trend, reading, line):
+        return {"segment": segment, "price_dir": price_dir, "side": side,
+                "vol_trend": vol_trend, "reading": reading, "line": line}
 
     zones = []
     round_events = []  # (bar, trough_price)
@@ -1546,7 +1633,24 @@ def indicator(df):
             if (z["bo_bar"] is None and base_ready
                     and i > 0 and close[i] > zup and close[i - 1] <= zup):
                 z["bo_bar"] = i
-                if SHOW_SIGNALS:
+                # מסנן ווליום קונים בפריצה: נר קונים (close>open) + ווליום
+                # הפריצה מעל ממוצע הווליום של BO_VOL_AVG_LEN הנרות שלפניו.
+                # ווליום חסר (NaN) או היסטוריה חסרה = לא עובר.
+                _bv = vol[i]
+                _prev = vol[max(0, i - BO_VOL_AVG_LEN):i]
+                _prev = _prev[~np.isnan(_prev)]
+                z["bo_vol_avg"] = (float(np.mean(_prev))
+                                   if len(_prev) else float("nan"))
+                z["bo_vol_ok"] = bool(
+                    close[i] > op[i]
+                    and not np.isnan(_bv)
+                    and len(_prev) > 0
+                    and float(np.mean(_prev)) > 0
+                    and float(_bv) > float(np.mean(_prev)) * BO_VOL_MIN_RATIO)
+                if z["bo_vol_ok"]:
+                    _bo_state["chart_zone"] = (float(zlo), float(zup),
+                                               float(close[i]))
+                if SHOW_SIGNALS and z["bo_vol_ok"]:
                     _mark(i, "buy", "Breakout")
             bb = z["bo_bar"]
             if bb is not None and not z["bo_done"] and not z["bo_dead"]:
@@ -1567,9 +1671,41 @@ def indicator(df):
                             bo_vol = vol[bb]
                             weaker = (not np.isnan(bo_vol)
                                       and float(np.mean(svv)) < float(bo_vol))
-                            if slope < 0 and weaker:
+                            if slope < 0 and weaker and z["bo_vol_ok"]:
                                 z["bo_done"] = True
                                 _mark(i, "buy", "BASE_BO")
+                                _avg = float(z.get("bo_vol_avg") or 0.0)
+                                _bv2 = float(bo_vol)
+                                _smean = float(np.mean(svv))
+                                _bo_state["details"] = {
+                                    "zone_low": round(float(zlo), 4),
+                                    "zone_high": round(float(zup), 4),
+                                    "zone_break_bar": int(z["break_bar"]),
+                                    "breakout_bar": int(bb),
+                                    "breakout_date": _bar_date(bb),
+                                    "breakout_price": round(float(close[bb]), 4),
+                                    "breakout_volume": _bv2,
+                                    "vol_avg50": round(_avg, 2),
+                                    "vol_ratio": (round(_bv2 / _avg, 3)
+                                                  if _avg > 0 else 0.0),
+                                    "vol_window_start": int(max(0, bb - BO_VOL_AVG_LEN)),
+                                    "retest_start_bar": int(bb + 1),
+                                    "retest_end_bar": int(i),
+                                    "confirm_bar": int(i),
+                                    "seller_vol_mean": round(_smean, 2),
+                                    "seller_vol_slope": round(float(slope), 2),
+                                    "seller_vs_breakout": (round(_smean / _bv2, 3)
+                                                           if _bv2 > 0 else 0.0),
+                                    "interval": str(INTERVAL),
+                                    "correlation": [
+                                        _pv("breakout", "up", "buyers", "up",
+                                            "bullish",
+                                            "פריצה: מחיר עולה, ווליום קונים עולה - שורי"),
+                                        _pv("retest", "down", "sellers", "down",
+                                            "bullish",
+                                            "בדיקת תמיכה: מחיר בודק את האזור, ווליום מוכרים יורד - שורי (המוכרים נחלשים)"),
+                                    ],
+                                }
 
         # ---------- תחתית מעוגלת (פרבולה + קוסינוס, רב-סקאלה) ----------
         # סורק את כל ההיסטוריה בחלונות בגדלים שונים — תופס U קצר וארוך
@@ -1687,9 +1823,24 @@ def indicator(df):
                 if SHOW_SIGNALS:
                     _mark(i, "buy", "C&H BO")
 
-    if SHOW_SIGNALS:
-        return {"markers": markers}
-    return {"markers": markers}
+    _out = {"markers": markers}
+    if _bo_state.get("details") is not None:
+        _out["details"] = _bo_state["details"]
+    _cz = _bo_state.get("chart_zone")
+    if _cz is not None:
+        _out["hlines"] = [
+            {"price": _cz[0], "color": "#f5b301", "title": "אזור פריצה - תחתון"},
+            {"price": _cz[1], "color": "#f5b301", "title": "אזור פריצה - עליון"},
+            {"price": _cz[2], "color": "#089981", "title": "מחיר פריצה"},
+        ]
+    try:
+        if not np.all(np.isnan(vol)):
+            _vma = pd.Series(vol).rolling(BO_VOL_AVG_LEN).mean()
+            _out["VOL::VolAvg50"] = [None if np.isnan(x) else float(x)
+                                     for x in _vma.to_numpy(dtype=float)]
+    except Exception:
+        pass
+    return _out
 '''
 
 
@@ -1711,7 +1862,11 @@ def scan(df):
                "Breakout": 1.0, "C&H": 1.0, "Round": 0.5}
     names = sorted({str(m.get("text", "?")) for m in recent})
     score = max([weights.get(t, 0.5) for t in names])
-    return {"signal": True,
-            "score": float(score),
-            "note": "דפוסים ב-3 נרות אחרונים: " + ", ".join(names)}
+    res = {"signal": True,
+           "score": float(score),
+           "note": "דפוסים ב-3 נרות אחרונים: " + ", ".join(names)}
+    # פרטים מובנים של הטרייד - רק כשה-BASE_BO עצמו טרי (הפרטים שייכים אליו)
+    if "BASE_BO" in names and isinstance(out.get("details"), dict):
+        res["details"] = out["details"]
+    return res
 ''')

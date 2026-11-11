@@ -155,6 +155,200 @@ def send_telegram_message(text: str, chat_id: Optional[str] = None):
         logger.error("Failed to send Telegram message: %s", err)
 
 
+def send_telegram_photo(png_bytes: bytes, caption: str,
+                        chat_id: Optional[str] = None) -> bool:
+    """Send a chart image via Telegram sendPhoto. True only on API success."""
+    target_chat = chat_id or TELEGRAM_CHAT_ID
+    if not TELEGRAM_BOT_TOKEN or not target_chat or not png_bytes:
+        logger.warning("[Telegram Not Configured] Photo caption: %s",
+                       caption[:120])
+        return False
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    try:
+        resp = requests.post(
+            url,
+            data={"chat_id": target_chat, "caption": caption[:1024],
+                  "parse_mode": "Markdown"},
+            files={"photo": ("chart.png", png_bytes, "image/png")},
+            timeout=20)
+        if resp.status_code != 200:
+            logger.warning("Telegram sendPhoto returned %s: %s",
+                           resp.status_code, resp.text[:200])
+            return False
+        return True
+    except Exception as err:
+        logger.error("Failed to send Telegram photo: %s", err)
+        return False
+
+
+def _chart_png(symbol: str, period: str, interval: str,
+               details: Optional[Dict] = None,
+               max_candles: int = 120) -> Optional[bytes]:
+    """Candlestick PNG for a Telegram alert.
+
+    With a BASE_BO `details` payload the chart is the full annotated
+    picture the user asked for: two synced panels (price + volume), the
+    identified breakout zone shaded across the window, the breakout
+    candle marked with its price, and on the volume panel a yellow
+    average-50 reference line, the highlighted breakout bar, a white
+    trend arrow over the volume measurement window, and a white
+    regression line over the seller bars of the support retest.
+    Without details (or if they do not line up with the loaded candles)
+    it degrades to the plain last-candles chart.
+
+    Returns PNG bytes or None — a chart failure must never break the
+    text alert for the same match; the caller falls back to text.
+    (In-image labels are English on purpose: the server has no Hebrew
+    font for matplotlib; all Hebrew lives in the Telegram caption.)
+    """
+    try:
+        import io
+
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from matplotlib.patches import Rectangle
+
+        data = _load_candles(symbol, period, interval)
+        candles = (data or {}).get("candles") or []
+        if len(candles) < 5:
+            return None
+
+        def _f(c, *keys):
+            for k in keys:
+                if c.get(k) is not None:
+                    return float(c[k])
+            return 0.0
+
+        n_all = len(candles)
+        det = details if isinstance(details, dict) else None
+        bb = re_end = -1
+        if det is not None:
+            try:
+                bb = int(det["breakout_bar"])
+                re_end = int(det["retest_end_bar"])
+                if not (0 <= bb < n_all and bb <= re_end < n_all):
+                    det = None
+            except (KeyError, TypeError, ValueError):
+                det = None
+
+        if det is not None:
+            start = max(0, bb - 110)
+            end = min(n_all, re_end + 6)
+        else:
+            start = max(0, n_all - max_candles)
+            end = n_all
+        view = candles[start:end]
+        opens = [_f(c, "open", "Open") for c in view]
+        highs = [_f(c, "high", "High") for c in view]
+        lows = [_f(c, "low", "Low") for c in view]
+        closes = [_f(c, "close", "Close") for c in view]
+        vols = [_f(c, "volume", "Volume") for c in view]
+        xs = list(range(start, end))
+
+        fig, (ax, axv) = plt.subplots(
+            2, 1, figsize=(9, 5.6), dpi=110, sharex=True,
+            gridspec_kw={"height_ratios": [3, 1], "hspace": 0.06})
+        # Dark theme (matches the user's TradingView look, and keeps the
+        # white trend arrows / annotations readable).
+        fig.patch.set_facecolor("#131722")
+        for _a in (ax, axv):
+            _a.set_facecolor("#131722")
+            _a.tick_params(colors="#d1d4dc", labelsize=8)
+            for _sp in _a.spines.values():
+                _sp.set_color("#2a2e39")
+        for i, (o, h, l, c) in enumerate(zip(opens, highs, lows, closes)):
+            color = "#089981" if c >= o else "#f23645"
+            ax.plot([xs[i], xs[i]], [l, h], color=color, linewidth=0.8)
+            ax.add_patch(Rectangle((xs[i] - 0.32, min(o, c)), 0.64,
+                                   max(abs(c - o), 1e-9),
+                                   facecolor=color, edgecolor=color))
+        vcolors = ["#089981" if c >= o else "#f23645"
+                   for o, c in zip(opens, closes)]
+        axv.bar(xs, vols, width=0.64, color=vcolors)
+
+        if det is not None:
+            zlo = float(det["zone_low"])
+            zup = float(det["zone_high"])
+            bprice = float(det["breakout_price"])
+            bvol = float(det["breakout_volume"])
+            avg50 = float(det["vol_avg50"])
+            r0 = int(det["retest_start_bar"])
+            # --- price panel: zone band + breakout marker ---
+            ax.axhspan(zlo, zup, color="#f5b301", alpha=0.22, zorder=0)
+            ax.axhline(zlo, color="#f5b301", linewidth=1.0)
+            ax.axhline(zup, color="#f5b301", linewidth=1.0)
+            ax.axvspan(r0 - 0.5, re_end + 0.5, color="#ffffff", alpha=0.06,
+                       zorder=0)
+            ax.axvline(bb, color="#ffffff", linewidth=0.9, linestyle="--")
+            ax.annotate(f"BREAKOUT {bprice:.2f}",
+                        xy=(bb, bprice), xytext=(bb, zup * 1.03),
+                        color="#ffffff", fontsize=8, ha="center",
+                        arrowprops=dict(arrowstyle="->", color="#ffffff",
+                                        lw=1.1))
+            ax.text(start + 1, zup, " ZONE", color="#f5b301", fontsize=8,
+                    va="bottom")
+            # --- volume panel: reference line, breakout bar, arrows ---
+            axv.axhline(avg50, color="#f5b301", linewidth=1.2)
+            axv.text(start + 1, avg50, " VolAvg50", color="#f5b301",
+                     fontsize=7, va="bottom")
+            bi = bb - start
+            if 0 <= bi < len(view):
+                axv.bar([bb], [vols[bi]], width=0.64, color="#ffd54f",
+                        edgecolor="#ffffff", linewidth=1.2, zorder=5)
+            wstart = max(start, int(det.get("vol_window_start",
+                                            bb - 50)))
+            ymax = max(vols) if vols else 1.0
+            axv.annotate("", xy=(bb, bvol * 1.04),
+                         xytext=(wstart, avg50 * 1.04),
+                         arrowprops=dict(arrowstyle="->", color="#ffffff",
+                                         lw=1.6))
+            sx, sy = [], []
+            for gi in range(max(r0, start), min(re_end, end - 1) + 1):
+                li = gi - start
+                if closes[li] < opens[li]:
+                    sx.append(gi)
+                    sy.append(vols[li])
+            if len(sx) >= 2:
+                k, m = np.polyfit(np.array(sx, dtype=float),
+                                  np.array(sy, dtype=float), 1)
+                axv.plot([sx[0], sx[-1]],
+                         [k * sx[0] + m, k * sx[-1] + m],
+                         color="#ffffff", linewidth=1.6)
+            axv.set_ylim(0, ymax * 1.18)
+            ax.set_title(f"{symbol} - {interval} - BASE BREAKOUT "
+                         f"{bprice:.2f} (zone {zlo:.2f}-{zup:.2f})",
+                         color="#ffffff")
+        else:
+            ax.axhline(closes[-1], color="#2962ff", linewidth=0.9,
+                       linestyle="--")
+            ax.set_title(f"{symbol} - {interval} - last {closes[-1]:.2f}",
+                         color="#ffffff")
+        ax.grid(True, alpha=0.25)
+        axv.grid(True, alpha=0.2)
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+        return buf.getvalue()
+    except Exception as err:
+        logger.warning("chart png failed for %s: %s", symbol, err)
+        return None
+
+
+def _fmt_vol(v) -> str:
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "—"
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:.1f}M"
+    if v >= 1_000:
+        return f"{v / 1_000:.0f}K"
+    return f"{v:.0f}"
+
+
 # ----------------------------------------------------------------------------
 # SQLite — saved scans only
 # ----------------------------------------------------------------------------
@@ -186,10 +380,18 @@ def _get_db() -> sqlite3.Connection:
                     active INTEGER NOT NULL DEFAULT 1,
                     last_run REAL NOT NULL DEFAULT 0,
                     last_matches_json TEXT NOT NULL DEFAULT '[]',
+                    last_results_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL
                 )
                 """
             )
+            # Migration for DBs created before last_results existed.
+            cols = [r[1] for r in
+                    _db_conn.execute("PRAGMA table_info(scans)").fetchall()]
+            if "last_results_json" not in cols:
+                _db_conn.execute(
+                    "ALTER TABLE scans ADD COLUMN last_results_json "
+                    "TEXT NOT NULL DEFAULT '[]'")
             _db_conn.commit()
     return _db_conn
 
@@ -204,6 +406,9 @@ def _row_to_scan(row: sqlite3.Row) -> Dict:
         "schedule_minutes": row["schedule_minutes"],
         "active": bool(row["active"]), "last_run": row["last_run"],
         "last_matches": json.loads(row["last_matches_json"] or "[]"),
+        "last_results": json.loads(
+            (row["last_results_json"] if "last_results_json" in row.keys()
+             else None) or "[]"),
         "created_at": row["created_at"],
     }
 
@@ -267,13 +472,26 @@ def db_delete_scan(scan_id: int) -> bool:
     return cur.rowcount > 0
 
 
-def db_scan_touch(scan_id: int, matches: List[str]) -> None:
+def db_scan_touch(scan_id: int, matches: List[str],
+                  results: Optional[List[Dict]] = None) -> None:
     conn = _get_db()
     with _db_lock:
-        conn.execute(
-            "UPDATE scans SET last_run = ?, last_matches_json = ? WHERE id = ?",
-            (time.time(), json.dumps(matches or []), scan_id),
-        )
+        if results is None:
+            conn.execute(
+                "UPDATE scans SET last_run = ?, last_matches_json = ? "
+                "WHERE id = ?",
+                (time.time(), json.dumps(matches or []), scan_id),
+            )
+        else:
+            slim = [{k: r.get(k) for k in ("symbol", "price", "change_pct",
+                                           "score", "note", "details")}
+                    for r in results if r.get("signal")]
+            conn.execute(
+                "UPDATE scans SET last_run = ?, last_matches_json = ?, "
+                "last_results_json = ? WHERE id = ?",
+                (time.time(), json.dumps(matches or []),
+                 json.dumps(slim, ensure_ascii=False), scan_id),
+            )
         conn.commit()
 
 # ----------------------------------------------------------------------------
@@ -405,16 +623,23 @@ _ticker_lists_cache: Dict[str, Tuple[float, List[str]]] = {}
 TICKER_LIST_TTL = 6 * 3600
 
 
-def _clean_ticker_list(raw: List[str]) -> List[str]:
+def _clean_ticker_list(raw) -> List[str]:
+    # Accepts a list of tickers, a single whitespace-separated string, or a
+    # list of whitespace-separated strings — all are flattened to tokens.
+    # (The Russell snapshot is one long string; iterating it directly used
+    # to yield single characters.)
+    if isinstance(raw, str):
+        raw = raw.split()
     out, seen = [], set()
     for t in raw:
-        s = (t or "").strip().upper().replace(".", "-")
-        if not s or s in seen:
-            continue
-        if not re.fullmatch(r"[A-Z0-9\-]{1,12}", s):
-            continue
-        seen.add(s)
-        out.append(s)
+        for tok in str(t or "").split():
+            s = tok.strip().upper().replace(".", "-")
+            if not s or s in seen:
+                continue
+            if not re.fullmatch(r"[A-Z0-9\-]{1,12}", s):
+                continue
+            seen.add(s)
+            out.append(s)
     return out
 
 
@@ -438,7 +663,7 @@ def _fetch_ticker_list(list_id: str) -> List[str]:
         elif list_id == "russell2000":
             # Bundled snapshot 2026-09-11 (upstream source file removed) —
             # Russell 2000 rebalances annually; refresh snapshot when needed.
-            symbols = _clean_ticker_list(_RUSSELL2000_SNAPSHOT)
+            symbols = _clean_ticker_list(_RUSSELL2000_SNAPSHOT.split())
         elif list_id == "sp500":
             html = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
                                 headers=_TICKER_LIST_UA, timeout=30).text
@@ -586,7 +811,7 @@ def _run_scan_job(symbols: List[str], interval: str, period: str,
     progress_cb(done_chunks, total_chunks) is invoked after each chunk when
     the scan runs as a background job."""
     t0 = time.time()
-    intraday = interval not in ("1d", "1wk")
+    intraday = interval not in ("1d", "1wk", "1mo")
     chunk_size = 150 if intraday else 500
     all_results: List[Dict] = []
     missing: List[str] = []
@@ -612,8 +837,9 @@ def _run_scan_job(symbols: List[str], interval: str, period: str,
     ordered = matched + rest
     return {
         "results": [
-            {k: r.get(k) for k in ("symbol", "price", "change_pct", "signal",
-                                   "score", "note", "error")}
+            {**{k: r.get(k) for k in ("symbol", "price", "change_pct",
+                                      "signal", "score", "note", "error")},
+             "details": r.get("details")}
             for r in ordered
         ],
         "scanned": total_with_data,
@@ -687,7 +913,7 @@ class PyChartRequest(BaseModel):
 
 SCAN_INTERVAL_PERIOD = {
     "5m": "5d", "15m": "1mo", "30m": "1mo", "1h": "1mo",
-    "1d": "1y", "1wk": "max",
+    "1d": "1y", "1wk": "max", "1mo": "max",
 }
 
 
@@ -986,7 +1212,7 @@ def api_run_saved_scan(scan_id: int):
     except Exception as e:
         logger.exception("saved scan run failed")
         raise HTTPException(status_code=500, detail=f"הסריקה נכשלה: {e}")
-    db_scan_touch(scan_id, out["matched_symbols"])
+    db_scan_touch(scan_id, out["matched_symbols"], out.get("results"))
     return out
 
 
@@ -1009,7 +1235,7 @@ def _execute_scheduled_scan(s: Dict) -> None:
         logger.exception("scheduled scan #%d failed", s["id"])
         return
     matched = out.get("matched_symbols") or []
-    db_scan_touch(s["id"], matched)
+    db_scan_touch(s["id"], matched, out.get("results"))
     if first_run:
         logger.info("scheduled scan #%d first run: %d matches (no notify)",
                     s["id"], len(matched))
@@ -1018,24 +1244,68 @@ def _execute_scheduled_scan(s: Dict) -> None:
     new = [m for m in matched if m not in prev]
     if new and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         by_sym = {r["symbol"]: r for r in out.get("results", [])}
-        lines = []
-        for sym in new[:15]:
+
+        def _line(sym):
             r = by_sym.get(sym, {})
             price = r.get("price")
             chg = r.get("change_pct", 0) or 0
             note = (r.get("note") or "").strip()
             price_s = f"${price:.2f}" if isinstance(price, (int, float)) else "—"
             line = f"• *{escape_md(sym)}* — {price_s} ({chg:+.1f}%)"
-            if note:
+            det = r.get("details")
+            if isinstance(det, dict):
+                corr = det.get("correlation") or []
+                for c in corr:
+                    if isinstance(c, dict) and c.get("line"):
+                        line += f"\n  {escape_md(str(c['line']))}"
+                line += (f"\n  🔗 https://www.tradingview.com/chart/"
+                         f"?symbol={sym}")
+            elif note:
                 line += f"\n  {escape_md(note)}"
-            lines.append(line)
-        more = f"\n_ועוד {len(new) - 15}…_" if len(new) > 15 else ""
-        msg = (f"🔍 *סריקה: {escape_md(s['name'])}*\n"
-               f"נמצאו {len(new)} סימולים חדשים תואמים:\n\n"
-               + "\n".join(lines) + more)
-        send_telegram_message(msg)
-        logger.info("scheduled scan #%d: notified %d new matches",
-                    s["id"], len(new))
+            return line
+
+        def _caption(sym):
+            r = by_sym.get(sym, {})
+            head = (f"🔍 *סריקה: {escape_md(s['name'])}*\n"
+                    + _line(sym))
+            det = r.get("details")
+            if not isinstance(det, dict):
+                return head
+            extra = (
+                f"\n🎯 פריצת בסיס מאושרת ({escape_md(str(det.get('interval') or s['interval']))})"
+                f"\nמחיר פריצה: ${float(det.get('breakout_price') or 0):.2f}"
+                f" (אזור: {float(det.get('zone_low') or 0):.2f}–{float(det.get('zone_high') or 0):.2f})"
+                f"\n📊 ווליום פריצה: {_fmt_vol(det.get('breakout_volume'))}"
+                f" מול ממוצע 50: {_fmt_vol(det.get('vol_avg50'))}"
+                f" (פי {float(det.get('vol_ratio') or 0):.2f})"
+                f"\n📉 ווליום מוכרים בבדיקה: {_fmt_vol(det.get('seller_vol_mean'))}"
+                f" ({float(det.get('seller_vs_breakout') or 0) * 100:.0f}% מהפריצה,"
+                f" שיפוע {float(det.get('seller_vol_slope') or 0):+.0f})")
+            return head + extra
+
+        # One photo message per new match (chart + details in the caption),
+        # up to 10 photos per run. Anything not photographed — beyond the
+        # cap or a chart/photo failure — still goes out in a text message,
+        # so no match is ever lost over a picture.
+        photographed = []
+        for sym in new[:10]:
+            det = (by_sym.get(sym, {}) or {}).get("details")
+            png = _chart_png(sym, s["period"], s["interval"], details=det)
+            if png is None:
+                continue
+            if send_telegram_photo(png, _caption(sym)):
+                photographed.append(sym)
+        rest = [sym for sym in new if sym not in photographed]
+        if rest:
+            lines = [_line(sym) for sym in rest[:15]]
+            more = f"\n_ועוד {len(rest) - 15}…_" if len(rest) > 15 else ""
+            msg = (f"🔍 *סריקה: {escape_md(s['name'])}*\n"
+                   f"נמצאו {len(new)} סימולים חדשים תואמים:\n\n"
+                   + "\n".join(lines) + more)
+            send_telegram_message(msg)
+        logger.info("scheduled scan #%d: notified %d new matches "
+                    "(%d with chart photos)", s["id"], len(new),
+                    len(photographed))
 
 
 def _background_scan_runner():

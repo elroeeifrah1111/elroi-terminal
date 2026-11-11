@@ -180,15 +180,20 @@ plot(slowEma, "Slow EMA", color=color.orange)`;
       clearSandboxOverlays();
       const ch = window.chart;
       const candles = (typeof lastCandles !== "undefined" && lastCandles) || [];
+      let hasVolPlot = false;
       (data.plots || []).forEach(p => {
-        const ls = ch.addLineSeries({
+        const opts = {
           color: p.color || "#2962ff",
           lineWidth: 2,
           priceLineVisible: false,
           lastValueVisible: false,
           crosshairMarkerVisible: false,
           title: p.name,
-        });
+        };
+        // Plots flagged pane:"vol" (server: "VOL::" name prefix) belong to
+        // the volume pane — same priceScaleId the built-in Volume uses.
+        if (p.pane === "vol") { opts.priceScaleId = "vol-pane"; hasVolPlot = true; }
+        const ls = ch.addLineSeries(opts);
         const pts = [];
         (p.values || []).forEach((v, i) => {
           if (v !== null && v !== undefined && candles[i]) {
@@ -198,6 +203,12 @@ plot(slowEma, "Slow EMA", color=color.orange)`;
         ls.setData(pts);
         sbSeries.push(ls);
       });
+      if (hasVolPlot) {
+        try {
+          ch.priceScale("vol-pane").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+          ch.priceScale("right").applyOptions({ scaleMargins: { top: 0.06, bottom: 0.28 } });
+        } catch (e) {}
+      }
       if ((data.markers || []).length) {
         try { candleSeries.setMarkers(data.markers); } catch (e) { console.error(e); }
       }
