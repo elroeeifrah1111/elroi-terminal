@@ -485,6 +485,7 @@ def _get_db() -> sqlite3.Connection:
                     last_matches_json TEXT NOT NULL DEFAULT '[]',
                     last_results_json TEXT NOT NULL DEFAULT '[]',
                     notified_json TEXT NOT NULL DEFAULT '[]',
+                    progress_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL
                 )
                 """
@@ -500,6 +501,10 @@ def _get_db() -> sqlite3.Connection:
                 _db_conn.execute(
                     "ALTER TABLE scans ADD COLUMN notified_json "
                     "TEXT NOT NULL DEFAULT '[]'")
+            if "progress_json" not in cols:
+                _db_conn.execute(
+                    "ALTER TABLE scans ADD COLUMN progress_json "
+                    "TEXT NOT NULL DEFAULT '{}'")
             _db_conn.commit()
     return _db_conn
 
@@ -523,6 +528,12 @@ def _row_to_scan(row: sqlite3.Row) -> Dict:
         "notified": json.loads(
             (row["notified_json"] if "notified_json" in row.keys()
              else None) or "[]"),
+        # Pass progress of the current/last scheduled run:
+        # {"chunk": done_chunks, "chunks": total_chunks,
+        #  "state": "running"|"done"|"error", "updated": epoch}
+        "progress": json.loads(
+            (row["progress_json"] if "progress_json" in row.keys()
+             else None) or "{}"),
         "created_at": row["created_at"],
     }
 
@@ -620,6 +631,23 @@ def db_scan_set_notified(scan_id: int, keys: List[str]) -> None:
         conn.execute(
             "UPDATE scans SET notified_json = ? WHERE id = ?",
             (json.dumps(keys or []), scan_id),
+        )
+        conn.commit()
+
+
+def db_scan_set_progress(scan_id: int, chunk: int, chunks: int,
+                         state: str) -> None:
+    """Persist scheduled-pass progress (chunk N of X) so status readers
+    (watchdog updates, findings panel) can show how far the current or
+    last pass got. state: "running" while chunks land, then "done" or
+    "error" at pass end."""
+    conn = _get_db()
+    prog = {"chunk": int(chunk or 0), "chunks": int(chunks or 0),
+            "state": state, "updated": time.time()}
+    with _db_lock:
+        conn.execute(
+            "UPDATE scans SET progress_json = ? WHERE id = ?",
+            (json.dumps(prog), scan_id),
         )
         conn.commit()
 
@@ -1647,15 +1675,42 @@ def _execute_scheduled_scan(s: Dict) -> None:
         # Stream partial state so the findings panel stays near-live.
         db_scan_touch(s["id"], list(acc_matched), list(acc_results))
 
+    prog = {"chunk": 0, "chunks": 0}
+
+    def _on_progress(done_chunks, total_chunks):
+        prog["chunk"], prog["chunks"] = done_chunks, total_chunks
+        try:
+            db_scan_set_progress(s["id"], done_chunks, total_chunks,
+                                 "running")
+        except Exception:
+            logger.exception("scheduled scan #%d: progress persist failed",
+                             s["id"])
+
+    try:
+        db_scan_set_progress(s["id"], 0, 0, "running")
+    except Exception:
+        logger.exception("scheduled scan #%d: progress init failed", s["id"])
     try:
         # No symbol limits (user requirement).
         out = _run_scan_job(symbols, s["interval"], s["period"],
-                            s["language"], s["code"], on_chunk=_on_chunk)
+                            s["language"], s["code"], on_chunk=_on_chunk,
+                            progress_cb=_on_progress)
     except Exception:
         logger.exception("scheduled scan #%d failed", s["id"])
+        try:
+            db_scan_set_progress(s["id"], prog["chunk"], prog["chunks"],
+                                 "error")
+        except Exception:
+            logger.exception("scheduled scan #%d: progress persist failed",
+                             s["id"])
         return
     matched = out.get("matched_symbols") or []
     db_scan_touch(s["id"], matched, out.get("results"))
+    try:
+        db_scan_set_progress(s["id"], prog["chunk"], prog["chunks"], "done")
+    except Exception:
+        logger.exception("scheduled scan #%d: progress persist failed",
+                         s["id"])
     if first_run:
         logger.info("scheduled scan #%d first run: %d matches (no notify)",
                     s["id"], len(matched))
