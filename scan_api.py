@@ -4,6 +4,10 @@ Self-contained: multi-symbol background scans (Python / Pine / strategy.*),
 saved + scheduled scans with Telegram alerts on new matches, ticker lists,
 single-symbol Pine/Python sandbox endpoints.
 
+Base Breakout detector v3 (local-leg swings, 2% retest proximity, breakout
+quality labels) live since 2026-11-13; scheduled passes notify on Telegram
+from the very first run.
+
 Mount from server.py:
     import scan_api
     scan_api.set_candle_loader(load_candles)   # fn(symbol, period, interval) -> {\"candles\": [...]}
