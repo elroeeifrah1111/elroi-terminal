@@ -213,6 +213,33 @@ def send_telegram_photo(png_bytes: bytes, caption: str,
         return False
 
 
+def _yf_scan_candles(symbol: str, period: str, interval: str) -> List[Dict]:
+    """Candles for an annotated alert chart, downloaded exactly like the
+    scanner downloads them (yfinance, the scan's own period/interval,
+    auto_adjust=True, OHLC rounded to 2 decimals) so the details' bar
+    indices line up with the loaded series. Returns [] on any failure;
+    the caller then falls back to the wired UI loader."""
+    try:
+        import yfinance as yf
+        df = yf.download(symbol, period=period, interval=interval,
+                         auto_adjust=True, progress=False)
+        if df is None or len(df) == 0:
+            return []
+        if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
+            df.columns = df.columns.get_level_values(0)
+        out: List[Dict] = []
+        for ts, row in df.iterrows():
+            out.append({"time": int(ts.timestamp()),
+                        "open": round(float(row["Open"]), 2),
+                        "high": round(float(row["High"]), 2),
+                        "low": round(float(row["Low"]), 2),
+                        "close": round(float(row["Close"]), 2),
+                        "volume": float(row["Volume"])})
+        return out
+    except Exception:
+        return []
+
+
 def _chart_png(symbol: str, period: str, interval: str,
                details: Optional[Dict] = None,
                max_candles: int = 120) -> Optional[bytes]:
@@ -244,8 +271,20 @@ def _chart_png(symbol: str, period: str, interval: str,
         import numpy as np
         from matplotlib.patches import Rectangle
 
-        data = _load_candles(symbol, period, interval)
-        candles = (data or {}).get("candles") or []
+        # Annotated charts MUST use the scan's own candle window: the
+        # details' bar indices count from the start of the scan's series.
+        # The wired UI loader (server.py) serves the terminal chart and
+        # returns a far shorter window (its period map does not know the
+        # scans' yfinance period strings, e.g. "20y" falls back to 400
+        # days), so the indices pointed past the loaded array and every
+        # annotation was silently dropped. Download exactly like the
+        # scanner does; fall back to the wired loader when that fails.
+        candles = []
+        if isinstance(details, dict) and details.get("breakout_bar") is not None:
+            candles = _yf_scan_candles(symbol, period, interval)
+        if not candles:
+            data = _load_candles(symbol, period, interval)
+            candles = (data or {}).get("candles") or []
         if len(candles) < 5:
             return None
 
