@@ -305,8 +305,9 @@ def _chart_png(symbol: str, period: str, interval: str,
             ax.add_patch(Rectangle((xs[i] - 0.32, min(o, c)), 0.64,
                                    max(abs(c - o), 1e-9),
                                    facecolor=color, edgecolor=color))
-        vcolors = ["#089981" if c >= o else "#f23645"
-                   for o, c in zip(opens, closes)]
+        vcolors = ["#089981" if (c > closes[i - 1] if i > 0 else c >= o)
+                   else "#f23645"
+                   for i, (o, c) in enumerate(zip(opens, closes))]
         axv.bar(xs, vols, width=0.64, color=vcolors)
 
         if det is not None:
@@ -314,7 +315,7 @@ def _chart_png(symbol: str, period: str, interval: str,
             zup = float(det["zone_high"])
             bprice = float(det["breakout_price"])
             bvol = float(det["breakout_volume"])
-            avg50 = det.get("vol_avg50")
+            avg50 = det.get("vol_avg120") or det.get("vol_avg50")
             avg50 = float(avg50) if avg50 else 0.0
             # --- price panel: zone band + breakout marker ---
             ax.axhspan(zlo, zup, color="#f5b301", alpha=0.22, zorder=0)
@@ -378,7 +379,7 @@ def _chart_png(symbol: str, period: str, interval: str,
             # --- volume panel: reference line, breakout bar, step lines ---
             if avg50 > 0:
                 axv.axhline(avg50, color="#f5b301", linewidth=1.2)
-                axv.text(start + 1, avg50, f" VolAvg50 {avg50:,.0f}",
+                axv.text(start + 1, avg50, f" VolAvg120 {avg50:,.0f}",
                          color="#f5b301", fontsize=7, va="bottom")
             bi = bb - start
             if 0 <= bi < len(view):
@@ -413,7 +414,8 @@ def _chart_png(symbol: str, period: str, interval: str,
             _step_line(sh, sl)   # down chunk: swing high -> swing low
             axv.set_ylim(0, ymax * 1.18)
             cat_en = {"fresh": "FRESH BREAKOUT", "retest": "RETEST",
-                      "confirmed": "CONFIRMED"}.get(
+                      "confirmed": "CONFIRMED", "waiting": "WAITING",
+                      "weak": "WEAK BREAKOUT"}.get(
                           str(det.get("category") or ""), "BASE BREAKOUT")
             ax.set_title(f"{symbol} - {interval} - {cat_en} "
                          f"{bprice:.2f} (zone {zlo:.2f}-{zup:.2f})",
@@ -1525,7 +1527,8 @@ def _notify_line(s: Dict, by_sym: Dict, sym: str) -> str:
 
 
 _CAT_HE = {"fresh": "פריצה טריה", "retest": "בבדיקת תמיכה",
-           "confirmed": "פריצת בסיס מאושרת"}
+           "confirmed": "פריצת בסיס מאושרת",
+           "waiting": "ממתינה לבדיקת תמיכה", "weak": "פריצה חלשה"}
 
 
 def _match_key(r: Dict) -> str:
@@ -1555,17 +1558,25 @@ def _notify_caption(s: Dict, by_sym: Dict, sym: str) -> str:
         f" (אזור: {float(det.get('zone_low') or 0):.2f}-{float(det.get('zone_high') or 0):.2f})"
         f"\n📊 ווליום פריצה: {_fmt_vol(det.get('breakout_volume'))}"
         f" מול הנר הקודם: {_fmt_vol(det.get('prev_candle_volume'))}"
-        f" (ממוצע 50: {_fmt_vol(det.get('vol_avg50'))}"
-        f", פי {float(det.get('vol_ratio') or 0):.2f})")
+        f" (ממוצע 120: {_fmt_vol(det.get('vol_avg120') or det.get('vol_avg50'))}"
+        f", פי {float(det.get('vol_ratio120') or det.get('vol_ratio') or 0):.2f})")
     if det.get("swing_high_price") is not None \
             and det.get("swing_low_price") is not None:
         extra += (
             f"\nסווינג היי: ${float(det['swing_high_price']):.2f}"
             f" · סווינג לואו: ${float(det['swing_low_price']):.2f}")
     if det.get("category") == "confirmed":
-        extra += (
-            f"\n✅ נר אישור: ווליום {_fmt_vol(det.get('trigger_volume'))}"
-            f" מעל נר השפל {_fmt_vol(det.get('low_candle_volume'))}")
+        extra += "\n✅ נר אישור: נר קונים אחרי לואו הבדיקה"
+        if det.get("trigger_vol_plus"):
+            extra += " · ווליום מעל נר השפל (יתרון)"
+        if det.get("trigger_hammer"):
+            extra += " · נר פטיש - הקונים השתלטו (יתרון חזק)"
+    elif det.get("category") == "waiting":
+        extra += "\n⏳ ממתינה לבדיקת תמיכה - הירידה עוד לא הגיעה לאזור"
+    elif det.get("category") == "weak":
+        extra += "\n🟠 פריצה חלשה - עלית ווליום הקונים דעכה אחרי הפריצה"
+        if det.get("gap_up"):
+            extra += " · הפריצה היתה בגאפ למעלה"
     elif det.get("category") == "retest":
         extra += (
             f"\nמדרגות ווליום: עליה "
@@ -1625,8 +1636,8 @@ def _execute_scheduled_scan(s: Dict) -> None:
       as crash protection: if the process dies mid-pass, the next pass's
       "previous matches" already include every match that was notified,
       so it is not notified twice.
-    - the first ever pass is a baseline: it streams results into
-      last_results but notifies nothing.
+    - every pass notifies, including the first one (user instruction
+      2026-11-13: Telegram alerts from the very first run).
     """
     first_run = not s["last_run"]
     try:
@@ -1660,7 +1671,7 @@ def _execute_scheduled_scan(s: Dict) -> None:
                 continue
             sym = e["symbol"]
             acc_matched.append(sym)
-            if (not first_run and telegram_ok
+            if (telegram_ok
                     and _match_key(e) not in prev_keys
                     and _match_key(e) not in notified):
                 fresh.append(e)
@@ -1711,13 +1722,10 @@ def _execute_scheduled_scan(s: Dict) -> None:
     except Exception:
         logger.exception("scheduled scan #%d: progress persist failed",
                          s["id"])
-    if first_run:
-        logger.info("scheduled scan #%d first run: %d matches (no notify)",
-                    s["id"], len(matched))
-    else:
-        logger.info("scheduled scan #%d finished: %d matches, "
-                    "%d notified during the pass",
-                    s["id"], len(matched), len(notified))
+    logger.info("scheduled scan #%d finished: %d matches, "
+                "%d notified during the pass%s",
+                s["id"], len(matched), len(notified),
+                " (first run)" if first_run else "")
 
 
 def _background_scan_runner():

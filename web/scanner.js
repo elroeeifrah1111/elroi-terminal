@@ -360,10 +360,13 @@
     { key: "confirmed", title: "🎯 מאושרות" },
     { key: "retest", title: "🟡 בבדיקת תמיכה / מדשדשות" },
     { key: "fresh", title: "🟢 פריצות טריות" },
+    { key: "waiting", title: "⏳ ממתינות לבדיקת תמיכה" },
+    { key: "weak", title: "🟠 פריצות חלשות" },
     { key: "", title: "📌 ממצאים נוספים" },
   ];
   const BB_CAT_HE = { confirmed: "מאושרת", retest: "בבדיקת תמיכה",
-                      fresh: "פריצה טריה" };
+                      fresh: "פריצה טריה", waiting: "ממתינה לבדיקת תמיכה",
+                      weak: "פריצה חלשה" };
 
   function renderBaseboFindings() {
     const box = $("bb-findings");
