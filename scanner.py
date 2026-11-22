@@ -2374,3 +2374,809 @@ def scan(df):
         res["details"] = det
     return res
 ''')
+
+
+# Scheduled-scan code for the 7 Base Breakout scans, kept in sync with
+# ~/workspace/basebo-work/scheduled_code.py by transplant.py.
+# Pure v3 detector + scan wrapper ONLY - unlike PY_BASEBO_SCAN_EXAMPLE
+# above, this never fires on other patterns (BASE_WATCH / C&H / Round).
+# Used by scan_api._seed_basebo_scans() to recreate the scans after a
+# Render restart wipes the service-local scans.db.
+PY_BASEBO_SCHEDULED_CODE = '''# =====================================================================
+# Base Breakout — הסטאפ של אלרואי (מפרט v3, 13.11.2026)
+# =====================================================================
+# שלבי התבנית:
+#  1. אזור תמיכה (נגיעה אחת מינימום בירידה) -> נשבר כלפי מטה -> הופך
+#     להתנגדות ממושכת.
+#  2. התבססות ארוכה תחת האזור: 3+ תחתיות מעוגלות (U) בעומקים משתנים
+#     (U-ים מקוננים), הבודקות את ההתנגדות שוב ושוב (2+ דחיות).
+#  3. פריצה אמיתית: סגירה מעל האזור כשווליום נר הפריצה גבוה מהווליום
+#     של הנר הקודם בלבד (זה השער היחיד; ממוצע 120 הוא רק מספר רקע).
+#  4. סווינגים מקומיים ברצף אחרי הפריצה (הליכה קדימה, בלי מקסימום
+#     גלובלי): הסווינג היי הוא השיא המקומי שהעליה פונה ממנה, והלואו
+#     הוא השפל של הירידה ממנו; שיא חדש מעל השיא הקודם סוגר את הרגל
+#     ופותח רגל חדשה. מדידת הווליום על הצד הדומיננטי בלבד (צבע נר =
+#     סגירה מול הסגירה הקודמת, כמו ב-TradingView של אלרואי):
+#     בעליה — ווליומי נרות הקונים עולים נר-אחרי-נר מהפריצה לשיא;
+#     בירידה — ווליומי נרות המוכרים יורדים מהשיא ללואו.
+#  5. בדיקת תמיכה: רק כשהסווינג לואו של הרגל הנוכחית מגיע עד
+#     RETEST_TOL (2%) מעל קצה האזור או לתוכו. עד אז הסטאפ "ממתין".
+#  6. אישור: נר קונים ראשון אחרי לואו הבדיקה — בלי שער ווליום.
+#     ווליום מעל נר הלואו = יתרון, נר פטיש = יתרון חזק (הערות איכות).
+# איכות הפריצה: עלית קונים דועכת (או פתיל עליון ארוך בנר עליה עם
+# ווליום קונים דועך) מסווגת "חלשה"; פריצה בגאפ = דגל אזהרה בלבד.
+# קטגוריות ב-details: "fresh" (פריצה טריה), "waiting" (ממתינה לבדיקת
+# תמיכה), "retest" (בבדיקת תמיכה), "weak" (פריצה חלשה), "confirmed"
+# (אחרי נר האישור). סדרות BASE_FRESH / BASE_RETEST מסמנות 1.0 בבר שבו
+# הקטגוריה fresh / retest מתחילה.
+# בנפרד (טרייד אחר, מתויג בנפרד): זיהוי C&H קלאסי ("C&H" / "C&H BO").
+#
+# indicator(df) — df עם נרות (time/open/high/low/close/volume).
+# markers: "BASE_WATCH" (בסיס נבנה, עוד אין פריצה), "Breakout" (פריצה),
+#          "BASE_BO" (הטרייד: פריצה + בדיקה + נר אישור),
+#          "Round" (תחתית מעוגלת), "C&H" / "C&H BO" (טרייד אחר).
+# זמינים: ta.* (sma/ema/atr/lowest/highest), pd, np, SYMBOL, INTERVAL.
+# =====================================================================
+
+# ================= פרמטרים =================
+PIVOT_LEN        = 5      # אורך פיבוט (נרות בכל צד)
+ATR_LEN          = 14
+ZONE_WIDTH_ATR   = 0.35   # חצי-רוחב אזור במכפלות ATR
+MIN_SUP_TOUCHES  = 1      # נגיעות תמיכה לפני השבירה (מינימום: נגיעה אחת בירידה)
+MIN_RES_RETESTS  = 2      # דחיות מההתנגדות אחרי ההיפוך
+MIN_ROUNDS       = 3      # תחתיות מעוגלות תחת האזור
+MIN_BASE_BARS    = 60     # אורך בסיס מינימלי (נרות) — "ארוך יחסית לטיים-פריים"
+BO_VOL_AVG_LEN   = 120    # חלון ממוצע ווליום - מספר רקע בלבד, לא שער (כמו בגרף של אלרואי)
+STEP_SELLERS     = 3      # מינימום נרות מוכרים בצ'אנק ירידה כדי לקרוא דעיכה
+RETEST_TOL       = 0.02   # קרבת לואו לאזור: עד 2% מעל הקצה העליון (הכרעת אלרואי 13.11)
+TREND_LEN        = 34
+LOOKBACK         = 500
+MAX_ZONES        = 30
+
+ROUND_WINDOWS       = (30, 60, 120)  # רב-סקאלה: תחתית בכל אורך גל, על כל ההיסטוריה
+ROUND_STRIDE        = 2              # דגימת חלון כל 2 נרות (חפיפה מספיקה)
+ROUND_DEDUP_BARS    = 15             # מיזוג זיהוי כפול של אותה תחתית (נרות)
+ROUND_DEDUP_PCT     = 0.05           # מיזוג זיהוי כפול של אותה תחתית (מחיר)
+MIN_R2              = 0.80
+MIN_CURVATURE       = 0.0005
+MIN_COS_R2          = 0.70   # סף R² להתאמת קוסינוס (שכבת סינון נוספת)
+MAX_SIN_RATIO       = 0.60   # |B|/|A| מקסימלי — שומר שהתחתית נשארת במרכז
+PRIOR_DROP_PCT      = 50.0
+PRIOR_DROP_LOOKBACK = 250
+
+C_PIVOT_LEN        = 3
+MIN_CUP_BARS       = 15
+MAX_CUP_BARS       = 120
+RIM_TOL            = 0.04
+MIN_DEPTH          = 0.10
+MAX_DEPTH          = 0.99
+MAX_HANDLE_RETRACE = 0.618
+
+SHOW_SIGNALS = True
+MINTICK      = 0.01
+
+
+def _pivot_series(h, l, left, right):
+    import numpy as np
+    n = len(h)
+    ph = np.full(n, np.nan)
+    pl = np.full(n, np.nan)
+    w = left + right + 1
+    for i in range(w - 1, n):
+        pb = i - right
+        wh = h[pb - left:pb + right + 1]
+        wl = l[pb - left:pb + right + 1]
+        if h[pb] >= np.nanmax(wh):
+            ph[i] = h[pb]
+        if l[pb] <= np.nanmin(wl):
+            pl[i] = l[pb]
+    return ph, pl
+
+
+def _is_buyer(close, i):
+    """צבע נר לפי סגירה מול הסגירה הקודמת - כמו 'צבע מבוסס על סגירה
+    קודמת' ב-TradingView של אלרואי. נר ראשון בסדרה: מול הפתיחה שלו."""
+    if i <= 0:
+        return None
+    if close[i] > close[i - 1]:
+        return True
+    if close[i] < close[i - 1]:
+        return False
+    return None
+
+
+def _buyers_rising(vol, close, b0, b1):
+    """ווליומי נרות הקונים בקטע [b0..b1] עולים בקפדנות נר-אחרי-נר?
+    מחזיר (ok, count, seq): ok=None אם יש פחות מ-2 נרות קונים."""
+    seq = []
+    for j in range(b0, b1 + 1):
+        if _is_buyer(close, j):
+            v = vol[j]
+            if v != v:  # NaN
+                return None, len(seq), seq
+            seq.append(float(v))
+    if len(seq) < 2:
+        return None, len(seq), seq
+    ok = all(seq[k] > seq[k - 1] for k in range(1, len(seq)))
+    return ok, len(seq), seq
+
+
+def _sellers_fading(vol, close, b0, b1):
+    """ווליומי נרות המוכרים בקטע [b0..b1] יורדים בקפדנות?
+    מחזיר (ok, count, seq): ok=None אם אין מספיק נרות מוכרים."""
+    seq = []
+    for j in range(b0, b1 + 1):
+        b = _is_buyer(close, j)
+        if b is False:
+            v = vol[j]
+            if v != v:  # NaN
+                return None, len(seq), seq
+            seq.append(float(v))
+    if len(seq) < STEP_SELLERS:
+        return None, len(seq), seq
+    ok = all(seq[k] < seq[k - 1] for k in range(1, len(seq)))
+    return ok, len(seq), seq
+
+
+def _chunk_steps(values, summ):
+    """דחיסת סדרה חתומה של צ'אנק לכ-5 מדרגות (עמודי גרף ההתראה):
+    summ=True -> סכום בכל מדרגה; אחרת ממוצע. [] אם הסדרה קצרה מ-2."""
+    import numpy as np
+    L = len(values)
+    if L < 2:
+        return []
+    w = max(1, -(-L // 5))
+    out = []
+    for j in range(0, L, w):
+        grp = values[j:j + w]
+        out.append(float(np.sum(grp)) if summ
+                   else float(np.mean(grp)))
+    return out
+
+
+def _is_hammer(o, h, l, c):
+    """נר פטיש: פתיל תחתון ארוך (לפחות פי 2 מהגוף) - הקונים השתלטו
+    בתוך הנר. גוף קטן בחלק העליון של הטווח."""
+    body = abs(c - o)
+    lower_w = min(o, c) - l
+    upper_w = h - max(o, c)
+    return lower_w >= 2.0 * max(body, 1e-9) and upper_w <= max(body, 1e-9)
+
+
+def _bb_new_zone(center, width, pbar, is_sup, downtrend):
+    return {
+        "center": center, "width": width, "touches": 1,
+        "sup": 1 if is_sup else 0, "res": 0 if is_sup else 1,
+        "first_bar": pbar, "last_bar": pbar,
+        "downtrend_origin": bool(is_sup and downtrend),
+        "broken": False, "break_bar": None, "retests": 0,
+        "bo_bar": None, "bo_done": False, "bo_dead": False,
+        "watch_fired": False, "bo_vol_ok": False, "bo_vol_avg": 0.0,
+        "bo_zlo": None, "bo_zup": None, "bo_prev_vol": None,
+        "bo_prev_close": None,
+        "quality": None, "gap_up": False, "wick_top": False,
+        "leg_high_bar": None, "leg_high_price": None,
+        "leg_low_bar": None, "leg_low_price": None,
+        "leg_low_vol": None, "anchor_sh_bar": None,
+        "anchor_sh_price": None, "retest_low_bar": None,
+        "retest_low_price": None, "retest_low_vol": None,
+        "up_steps": [], "down_steps": [],
+        "up_steps_ok": False, "down_steps_ok": False,
+        "trigger_bar": None, "trig_vol_plus": False,
+        "trig_hammer": False, "struct_dead": False, "cat": None,
+        "_steps_key": None,
+    }
+
+
+def indicator(df):
+    import numpy as np
+
+    n = len(df)
+    op    = df["Open"].to_numpy(dtype=float)
+    high  = df["High"].to_numpy(dtype=float)
+    low   = df["Low"].to_numpy(dtype=float)
+    close = df["Close"].to_numpy(dtype=float)
+    vol   = (df["Volume"].to_numpy(dtype=float)
+             if "Volume" in df.columns else np.full(n, np.nan))
+
+    atr_s    = ta.atr(df["High"], df["Low"], df["Close"], ATR_LEN).to_numpy(dtype=float)
+    trend    = ta.ema(df["Close"], TREND_LEN)
+    falling  = (trend < trend.shift(TREND_LEN)).to_numpy()
+    falling  = np.nan_to_num(falling.astype(float), nan=0.0).astype(bool)
+    _sm, _wmin, _wmax, _patlow, _smsz = {}, {}, {}, {}, {}
+    for _W in ROUND_WINDOWS:
+        _sz = max(5, _W // 6)
+        _smsz[_W] = _sz
+        _s = ta.sma(df["Close"], _sz).to_numpy(dtype=float)
+        _sm[_W] = _s
+        _wmin[_W] = ta.lowest(_s, _W).to_numpy(dtype=float)
+        _wmax[_W] = ta.highest(_s, _W).to_numpy(dtype=float)
+        _patlow[_W] = ta.lowest(df["Low"], _W).to_numpy(dtype=float)
+    _RW_DESC = tuple(sorted(ROUND_WINDOWS, reverse=True))
+    prior_high = ta.highest(df["High"], PRIOR_DROP_LOOKBACK).to_numpy(dtype=float)
+
+    ph, pl   = _pivot_series(high, low, PIVOT_LEN, PIVOT_LEN)
+    cph, cpl = _pivot_series(high, low, C_PIVOT_LEN, C_PIVOT_LEN)
+
+    markers = []
+    seen = set()
+
+    def _mark(bar, side, text):
+        key = (int(bar), text)
+        if key not in seen:
+            seen.add(key)
+            markers.append({"bar": int(bar), "side": side, "text": text})
+
+    # פרטי הסטאפ הפעיל האחרון + האזור האחרון שהגיע לפריצה (לסימוני גרף)
+    _bo_state = {"details": None, "chart_zone": None, "owner": None}
+    # סדרות מצב: 1.0 בבר שבו קטגוריה מתחילה (None בשאר הברים)
+    _fresh_series = [None] * n
+    _retest_series = [None] * n
+
+    def _bar_date(bar):
+        try:
+            if "time" in df.columns:
+                tv = df["time"].iloc[int(bar)]
+                try:
+                    return str(pd.to_datetime(float(tv), unit="s",
+                                              utc=True).date())
+                except Exception:
+                    return str(tv)[:10]
+        except Exception:
+            pass
+        return ""
+
+    def _pv(segment, price_dir, side, vol_trend, reading, line):
+        return {"segment": segment, "price_dir": price_dir, "side": side,
+                "vol_trend": vol_trend, "reading": reading, "line": line}
+
+    def _fv(v):
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return "-"
+        if v != v:  # NaN
+            return "-"
+        return f"{v:,.0f}"
+
+    def _bb_details(z, zlo, zup, cat):
+        """בניית ה-details של הסטאפ הפעיל (כל קטגוריה) מהמצב הנוכחי.
+        הסווינג היי/לואו המדווחים: של רגל הבדיקה אם יש, אחרת של הרגל
+        הנוכחית."""
+        bb = z["bo_bar"]
+        if z["retest_low_bar"] is not None:
+            shb, shp = z["anchor_sh_bar"], z["anchor_sh_price"]
+            slb, slp = z["retest_low_bar"], z["retest_low_price"]
+        else:
+            shb, shp = z["leg_high_bar"], z["leg_high_price"]
+            slb, slp = z["leg_low_bar"], z["leg_low_price"]
+        tb = z["trigger_bar"]
+        _bv = float(vol[bb])
+        _pvv = (float(vol[bb - 1]) if bb > 0 else float("nan"))
+        _avg = z.get("bo_vol_avg")
+        _avg = float(_avg) if _avg is not None else float("nan")
+        _avg_ok = _avg == _avg and _avg > 0
+        corr = [
+            _pv("breakout", "up", "buyers", "up", "bullish",
+                "ווליום פריצה " + _fv(_bv) + " מעל הנר הקודם " + _fv(_pvv)),
+        ]
+        if z["quality"] == "weak":
+            _wl = ("עלית קונים דועכת מהפריצה"
+                   + (" + פתיל עליון ארוך" if z["wick_top"] else "")
+                   + " - פריצה חלשה")
+            corr.append(_pv("rise", "up", "buyers", "down", "bearish", _wl))
+        elif z["quality"] == "strong":
+            corr.append(_pv("rise", "up", "buyers", "up", "bullish",
+                            "צ'אנק עליה: ווליום קונים עולה נר אחרי נר"))
+        else:
+            corr.append(_pv("rise", "up", "buyers", "none", "neutral",
+                            "צ'אנק עליה: עוד אין מספיק נרות קונים לקריאה"))
+        if z["gap_up"]:
+            corr.append(_pv("breakout", "up", "buyers", "none", "neutral",
+                            "הפריצה היתה בגאפ למעלה - רוב הגאפים נסגרים "
+                            "מתישהו (דגל אזהרה)"))
+        if slb is not None:
+            if cat in ("retest", "confirmed"):
+                if z["down_steps_ok"]:
+                    corr.append(_pv("retest", "down", "sellers", "down",
+                                    "bullish",
+                                    "צ'אנק בדיקה: ווליום מוכרים דועך"))
+                else:
+                    corr.append(_pv("retest", "down", "sellers", "up",
+                                    "bearish",
+                                    "צ'אנק בדיקה: ווליום מוכרים לא דועך"))
+            else:
+                corr.append(_pv("retest", "down", "sellers", "none",
+                                "neutral",
+                                "הירידה עוד לא הגיעה לאזור - "
+                                "ממתין לבדיקת תמיכה"))
+        if tb is not None:
+            _tl = ("נר אישור: נר קונים אחרי לואו הבדיקה"
+                   + (" + ווליום מעל נר הלואו"
+                      if z["trig_vol_plus"] else "")
+                   + (" + נר פטיש, הקונים השתלטו"
+                      if z["trig_hammer"] else ""))
+            corr.append(_pv("trigger", "up", "buyers", "up", "bullish",
+                            _tl))
+        _tb_ok = (tb is not None)
+        return {
+            "category": cat,
+            "quality": z["quality"],
+            "gap_up": bool(z["gap_up"]),
+            "zone_low": round(float(zlo), 4),
+            "zone_high": round(float(zup), 4),
+            "zone_break_bar": int(z["break_bar"]),
+            "breakout_bar": int(bb),
+            "breakout_date": _bar_date(bb),
+            "breakout_price": round(float(close[bb]), 4),
+            "breakout_volume": _bv,
+            "prev_candle_volume": (_pvv if _pvv == _pvv else None),
+            "vol_avg50": None,
+            "vol_avg120": (round(_avg, 2) if _avg_ok else None),
+            "vol_ratio120": (round(_bv / _avg, 3) if _avg_ok else 0.0),
+            "vol_window_start": int(max(0, bb - BO_VOL_AVG_LEN)),
+            "swing_high_bar": (int(shb) if shb is not None else None),
+            "swing_high_price": (round(float(shp), 4)
+                                 if shp is not None else None),
+            "swing_low_bar": (int(slb) if slb is not None else None),
+            "swing_low_price": (round(float(slp), 4)
+                                if slp is not None else None),
+            "low_candle_volume": (float(vol[slb])
+                                  if slb is not None else None),
+            "up_steps": [round(float(x), 2) for x in (z["up_steps"] or [])],
+            "down_steps": [round(float(x), 2)
+                           for x in (z["down_steps"] or [])],
+            "up_steps_ok": bool(z["up_steps_ok"]),
+            "down_steps_ok": bool(z["down_steps_ok"]),
+            "trigger_bar": (int(tb) if _tb_ok else None),
+            "trigger_date": (_bar_date(tb) if _tb_ok else None),
+            "trigger_price": (round(float(close[tb]), 4)
+                              if _tb_ok else None),
+            "trigger_volume": (float(vol[tb]) if _tb_ok else None),
+            "trigger_vol_plus": bool(z["trig_vol_plus"]),
+            "trigger_hammer": bool(z["trig_hammer"]),
+            "confirm_bar": (int(tb) if _tb_ok else None),
+            "retest_start_bar": (int(shb) if shb is not None
+                                 else int(bb) + 1),
+            "retest_end_bar": int(tb if _tb_ok
+                                  else (slb if slb is not None else bb)),
+            "interval": str(INTERVAL),
+            "correlation": corr,
+        }
+
+
+    zones = []
+    round_events = []  # (bar, trough_price)
+
+    # ---- מצב C&H (טרייד נפרד) ----
+    phB, phP, plB, plP = [], [], [], []
+    b2_p = None
+    active_neckline = None
+    pattern_active = False
+    breakout_confirmed = False
+
+    for i in range(n):
+        if zones:
+            zones = [z for z in zones if i - z["last_bar"] <= LOOKBACK]
+        if round_events and round_events[0][0] < i - LOOKBACK:
+            round_events = [e for e in round_events if e[0] >= i - LOOKBACK]
+
+        # ---------- קיבוץ פיבוטים לאזורים ----------
+        for ptype in (0, 1):  # 0 = שפל (תמיכה), 1 = שיא (התנגדות)
+            pv = pl[i] if ptype == 0 else ph[i]
+            if np.isnan(pv):
+                continue
+            is_sup = (ptype == 0)
+            pbar = i - PIVOT_LEN
+            down_at_pivot = bool(falling[pbar]) if pbar >= 0 else False
+            a = atr_s[pbar] if pbar >= 0 else np.nan
+            pwidth = max((a if not np.isnan(a) else MINTICK) * ZONE_WIDTH_ATR,
+                         MINTICK * 2.0)
+            best, best_d = -1, float("inf")
+            for zi, z in enumerate(zones):
+                d = abs(pv - z["center"])
+                if d <= max(z["width"], pwidth) and d < best_d:
+                    best, best_d = zi, d
+            if best >= 0:
+                z = zones[best]
+                t = z["touches"]
+                z["center"] = (z["center"] * t + pv) / (t + 1)
+                z["width"] = max(z["width"], pwidth)
+                z["touches"] = t + 1
+                z["sup"] += 1 if is_sup else 0
+                z["res"] += 0 if is_sup else 1
+                z["first_bar"] = min(z["first_bar"], pbar)
+                z["last_bar"] = pbar
+                if is_sup and down_at_pivot:
+                    z["downtrend_origin"] = True
+            else:
+                if len(zones) >= MAX_ZONES:
+                    wi = min(range(len(zones)),
+                             key=lambda k: zones[k]["touches"])
+                    zones.pop(wi)
+                zones.append(_bb_new_zone(pv, pwidth, pbar, is_sup,
+                                          down_at_pivot))
+
+        # ---------- שבירה / דחיות / פריצה / בדיקת תמיכה ----------
+        for z in zones:
+            zc, zw = z["center"], z["width"]
+            zup, zlo = zc + zw, zc - zw
+            if (not z["broken"] and z["downtrend_origin"]
+                    and z["sup"] >= MIN_SUP_TOUCHES and z["sup"] > z["res"]
+                    and i > 0 and close[i] < zlo and close[i - 1] >= zlo):
+                z["broken"] = True
+                z["break_bar"] = i
+            if not z["broken"]:
+                continue
+            if z["bo_bar"] is None:
+                piv_after = (i - PIVOT_LEN) > z["break_bar"]
+                if (not np.isnan(ph[i]) and piv_after and zlo <= ph[i] <= zup
+                        and i - PIVOT_LEN >= 0
+                        and close[i - PIVOT_LEN] < zc):
+                    z["retests"] += 1
+            bb_lim = z["bo_bar"] if z["bo_bar"] is not None else i
+            rounds = sum(1 for (b, t) in round_events
+                         if z["break_bar"] < b <= bb_lim and t < zlo)
+            base_bars = bb_lim - z["break_bar"]
+            base_ready = (z["retests"] >= MIN_RES_RETESTS
+                          and rounds >= MIN_ROUNDS and base_bars >= MIN_BASE_BARS)
+            if (SHOW_SIGNALS and not z["watch_fired"]
+                    and z["bo_bar"] is None and base_ready):
+                z["watch_fired"] = True
+                _mark(i, "buy", "BASE_WATCH")
+            if (z["bo_bar"] is None and base_ready
+                    and i > 0 and close[i] > zup and close[i - 1] <= zup):
+                z["bo_bar"] = i
+                # שער הפריצה היחיד: ווליום נר הפריצה גבוה מהווליום של
+                # הנר הקודם (קפדני). ממוצע BO_VOL_AVG_LEN הנרות שלפניו
+                # מחושב כמספר רקע בלבד (vol_avg50 / vol_avg120).
+                _bv = vol[i]
+                _pvv = vol[i - 1]
+                _prev = vol[max(0, i - BO_VOL_AVG_LEN):i]
+                _prev = _prev[~np.isnan(_prev)]
+                z["bo_vol_avg"] = (float(np.mean(_prev))
+                                   if len(_prev) else float("nan"))
+                z["bo_prev_vol"] = float(_pvv)
+                z["bo_prev_close"] = float(close[i - 1])
+                z["bo_vol_ok"] = bool(
+                    not np.isnan(_bv) and not np.isnan(_pvv)
+                    and float(_bv) > float(_pvv))
+                # גבולות האזור מוקפאים כפי שסומנו ברגע הפריצה.
+                z["bo_zlo"] = float(zlo)
+                z["bo_zup"] = float(zup)
+                if z["bo_vol_ok"]:
+                    _bo_state["chart_zone"] = (float(zlo), float(zup),
+                                               float(close[i]))
+                    z["quality"] = None
+                    z["gap_up"] = bool(
+                        float(low[i]) > float(z["bo_prev_close"]))
+                    z["wick_top"] = False
+                    z["leg_high_bar"] = i
+                    z["leg_high_price"] = float(high[i])
+                    _upq = _buyers_rising(vol, close, i, i)
+                    z["up_steps"] = _chunk_steps(list(_upq[2]), False)
+                    z["up_steps_ok"] = False
+                if SHOW_SIGNALS and z["bo_vol_ok"]:
+                    _mark(i, "buy", "Breakout")
+            bb = z["bo_bar"]
+            if bb is not None and not z["bo_dead"]:
+                bzlo, bzup = z["bo_zlo"], z["bo_zup"]
+                if close[i] < bzlo:
+                    # מוות: סגירה מתחת לתחתית האזור שסומן בפריצה.
+                    z["bo_dead"] = True
+                    z["cat"] = None
+                    if _bo_state.get("owner") is z:
+                        _bo_state["details"] = None
+                        _bo_state["owner"] = None
+                elif z["bo_vol_ok"] and not z["struct_dead"]:
+                    if not z["bo_done"]:
+                        # === מכונת רגליים: סווינגים מקומיים ברצף ===
+                        # שיא חדש מעל שיא הרגל: הרגל הקודמת נסגרת (אם
+                        # הלואו שלה הגיע לאזור היא היתה הבדיקה), ורגל
+                        # חדשה נפתחת מהשיא החדש.
+                        if (i > z["leg_high_bar"]
+                                and high[i] > z["leg_high_price"]):
+                            if z["anchor_sh_bar"] is None:
+                                z["leg_low_bar"] = None
+                                z["leg_low_price"] = None
+                                z["leg_low_vol"] = None
+                            z["leg_high_bar"] = i
+                            z["leg_high_price"] = float(high[i])
+                            # מדידות הרגל החדשה: צ'אנק עליה נמדד מחדש.
+                            _key = ("leg", i)
+                            if _key != z["_steps_key"]:
+                                z["_steps_key"] = _key
+                                _up = _buyers_rising(vol, close, bb, i)
+                                z["up_steps"] = _chunk_steps(
+                                    list(_up[2]), False)
+                                z["up_steps_ok"] = bool(_up[0])
+                                _fade = bool(
+                                    _up[0] is False
+                                    or (_is_buyer(close, i)
+                                        and i > bb
+                                        and vol[i] == vol[i]
+                                        and vol[bb] == vol[bb]
+                                        and float(vol[i]) < float(vol[bb])))
+                                _wk = False
+                                if _is_buyer(close, i):
+                                    _body = abs(close[i] - op[i])
+                                    _uw = high[i] - max(op[i], close[i])
+                                    _wk = bool(
+                                        _body > 0 and _uw > _body
+                                        and _up[0] is False)
+                                z["quality"] = (
+                                    "weak" if (_fade or _wk)
+                                    else ("strong" if _up[0] else None))
+                                z["wick_top"] = bool(_wk)
+                                z["down_steps"] = []
+                                z["down_steps_ok"] = False
+                        # לואו של הרגל הנוכחית (אחרי שיא הרגל, ורק לפני
+                        # שנקבעה בדיקה ברגל הזו).
+                        if (i > z["leg_high_bar"]
+                                and z["anchor_sh_bar"] is None):
+                            if (z["leg_low_bar"] is None
+                                    or low[i] < z["leg_low_price"]):
+                                z["leg_low_bar"] = i
+                                z["leg_low_price"] = float(low[i])
+                                z["leg_low_vol"] = float(vol[i])
+                                if z["leg_low_price"] < bzlo:
+                                    # שפל מתחת לתחתית האזור - מבנה פסול.
+                                    z["struct_dead"] = True
+                                elif z["leg_low_price"] <= bzup * (
+                                        1.0 + RETEST_TOL):
+                                    # הלואו הגיע לאזור - זו הבדיקה.
+                                    z["anchor_sh_bar"] = z["leg_high_bar"]
+                                    z["anchor_sh_price"] = (
+                                        z["leg_high_price"])
+                                    z["retest_low_bar"] = i
+                                    z["retest_low_price"] = float(low[i])
+                                    z["retest_low_vol"] = float(vol[i])
+                                    _dn = _sellers_fading(
+                                        vol, close, z["anchor_sh_bar"], i)
+                                    z["down_steps"] = _chunk_steps(
+                                        list(_dn[2]), True)
+                                    z["down_steps_ok"] = bool(_dn[0])
+                                    if z["down_steps_ok"]:
+                                        z["cat"] = "retest"
+                                        _retest_series[i] = 1.0
+                        elif (z["anchor_sh_bar"] is not None
+                                and z["trigger_bar"] is None
+                                and i > z["retest_low_bar"]
+                                and low[i] < z["retest_low_price"]):
+                            # הבדיקה מעמיקה: הלואו מתעדכן, הדעיכה
+                            # נמדדת מחדש מהעוגן אל הלואו החדש.
+                            if low[i] < bzlo:
+                                z["struct_dead"] = True
+                            else:
+                                z["retest_low_bar"] = i
+                                z["retest_low_price"] = float(low[i])
+                                z["retest_low_vol"] = float(vol[i])
+                                _dn = _sellers_fading(
+                                    vol, close, z["anchor_sh_bar"], i)
+                                z["down_steps"] = _chunk_steps(
+                                    list(_dn[2]), True)
+                                z["down_steps_ok"] = bool(_dn[0])
+                        # --- נר אישור: נר קונים ראשון אחרי לואו הבדיקה
+                        # (בלי שער ווליום) ---
+                        if (not z["struct_dead"]
+                                and z["anchor_sh_bar"] is not None
+                                and z["down_steps_ok"]
+                                and z["trigger_bar"] is None
+                                and i > z["retest_low_bar"]
+                                and _is_buyer(close, i)):
+                            z["bo_done"] = True
+                            z["trigger_bar"] = i
+                            _lv = z["retest_low_vol"]
+                            z["trig_vol_plus"] = bool(
+                                _lv is not None and _lv == _lv
+                                and vol[i] == vol[i]
+                                and float(vol[i]) > float(_lv))
+                            z["trig_hammer"] = bool(_is_hammer(
+                                op[i], high[i], low[i], close[i]))
+                            if SHOW_SIGNALS:
+                                _mark(i, "buy", "BASE_BO")
+                    # --- קטגוריה + צילום פרטים של הסטאפ הפעיל ---
+                    if z["struct_dead"]:
+                        z["cat"] = None
+                        if _bo_state.get("owner") is z:
+                            _bo_state["details"] = None
+                            _bo_state["owner"] = None
+                    else:
+                        if z["bo_done"]:
+                            _cat = "confirmed"
+                        elif z["anchor_sh_bar"] is not None:
+                            _cat = "retest"
+                        elif z["quality"] == "weak":
+                            _cat = "weak"
+                        elif z["leg_low_bar"] is not None:
+                            _cat = "waiting"
+                        else:
+                            _cat = "fresh"
+                        if _cat != z["cat"]:
+                            _prev_cat = z["cat"]
+                            z["cat"] = _cat
+                            if _cat == "fresh":
+                                _fresh_series[i] = 1.0
+                            elif _cat == "retest" and (
+                                    _prev_cat != "confirmed"):
+                                _retest_series[i] = 1.0
+                        _bo_state["owner"] = z
+                        _bo_state["details"] = _bb_details(
+                            z, bzlo, bzup, _cat)
+
+
+        # ---------- תחתית מעוגלת (פרבולה + קוסינוס, רב-סקאלה) ----------
+        # סורק את כל ההיסטוריה בחלונות בגדלים שונים — תופס U קצר וארוך
+        for W in _RW_DESC:
+            sm_ = _smsz[W]
+            if i < W + sm_ - 1 or (i % ROUND_STRIDE):
+                continue
+            sb = i - W + 1
+            smv = _sm[W]
+            if np.isnan(smv[sb]):
+                continue
+            wmin, wmax = _wmin[W][i], _wmax[W][i]
+            if np.isnan(wmin) or np.isnan(wmax) or wmax <= wmin:
+                continue
+            y = smv[sb:i + 1]
+            yn = (y - wmin) / (wmax - wmin)
+            x = np.arange(W, dtype=float)
+            a_, b_, c_ = np.polyfit(x, yn, 2)  # y = a*x^2 + b*x + c
+            vx = -b_ / (2.0 * a_) if a_ != 0 else np.nan
+            fit = a_ * x * x + b_ * x + c_
+            mean = yn.mean()
+            sse = ((yn - fit) ** 2).sum()
+            sst = ((yn - mean) ** 2).sum()
+            r2 = 1.0 - sse / sst if sst > 0 else 0.0
+            valid = (a_ >= MIN_CURVATURE and r2 >= MIN_R2
+                     and W * 0.33 < vx < W * 0.66)
+            # שכבת קוסינוס: האם החלון נשלט בידי סווינג נקי אחד
+            # (גל יחיד בתדר החלון) ולא רעש/קיטועים
+            th = 2.0 * np.pi * x / W
+            Xc = np.column_stack([np.ones(W), np.cos(th), np.sin(th)])
+            coef = np.linalg.lstsq(Xc, yn, rcond=None)[0]
+            A_, B_ = float(coef[1]), float(coef[2])
+            fitc = Xc @ coef
+            ssec = ((yn - fitc) ** 2).sum()
+            r2c = 1.0 - ssec / sst if sst > 0 else 0.0
+            cos_ok = (A_ > 0 and r2c >= MIN_COS_R2
+                      and abs(B_) <= MAX_SIN_RATIO * abs(A_))
+            phv = prior_high[i]
+            plv = _patlow[W][i]
+            drop = ((phv - plv) / phv * 100.0
+                    if phv > 0 and not np.isnan(plv) else 0.0)
+            setup = bool(valid and cos_ok and drop >= PRIOR_DROP_PCT)
+            if setup:
+                vbar = sb + int(round(vx))
+                trough = wmin + (a_ * vx * vx + b_ * vx + c_) * (wmax - wmin)
+                dup = False
+                for (eb, et) in round_events:
+                    if (abs(eb - vbar) <= ROUND_DEDUP_BARS
+                            and abs(et - trough)
+                            <= ROUND_DEDUP_PCT * max(abs(et), 1e-9)):
+                        dup = True
+                        break
+                if not dup:
+                    round_events.append((vbar, float(trough)))
+                    if SHOW_SIGNALS:
+                        _mark(i, "buy", "Round")
+
+        # ---------- C&H: איסוף פיבוטים (טרייד נפרד) ----------
+        ccph = cph[i]
+        ccpl = cpl[i]
+        if not np.isnan(ccph):
+            phB.append(i - C_PIVOT_LEN)
+            phP.append(float(ccph))
+            if len(phB) > 50:
+                phB.pop(0); phP.pop(0)
+        if not np.isnan(ccpl):
+            plB.append(i - C_PIVOT_LEN)
+            plP.append(float(ccpl))
+            if len(plB) > 50:
+                plB.pop(0); plP.pop(0)
+
+        # ---------- C&H: זיהוי (בכל שיא-פיבוט חדש) ----------
+        if len(phB) >= 3 and len(plB) >= 2 and not np.isnan(ccph):
+            pR3_bar, pR3_p = phB[-1], phP[-1]
+            pR2_bar, pR2_p = phB[-2], phP[-2]
+            for k in range(len(phB) - 3, max(0, len(phB) - 8) - 1, -1):
+                pR1_bar, pR1_p = phB[k], phP[k]
+                cup_bars = pR2_bar - pR1_bar
+                if not (MIN_CUP_BARS <= cup_bars <= MAX_CUP_BARS):
+                    continue
+                avg_neck = (pR1_p + pR2_p) / 2.0
+                if avg_neck <= 0:
+                    continue
+                if abs(pR1_p - pR2_p) / avg_neck > RIM_TOL:
+                    continue
+                lc_p = lc_b = None
+                for jb, jp in zip(plB, plP):
+                    if pR1_bar < jb < pR2_bar and (lc_p is None or jp < lc_p):
+                        lc_p, lc_b = jp, jb
+                lh_p = lh_b = None
+                for jb, jp in zip(plB, plP):
+                    if pR2_bar < jb < pR3_bar and (lh_p is None or jp < lh_p):
+                        lh_p, lh_b = jp, jb
+                if lc_p is None or lh_p is None:
+                    continue
+                depth = (avg_neck - lc_p) / avg_neck
+                depth_val = avg_neck - lc_p
+                handle_pb = pR2_p - lh_p
+                if (MIN_DEPTH <= depth <= MAX_DEPTH and lh_p > lc_p
+                        and handle_pb <= depth_val * MAX_HANDLE_RETRACE):
+                    b2_p = lh_p
+                    active_neckline = avg_neck
+                    pattern_active = True
+                    breakout_confirmed = False
+                    if SHOW_SIGNALS:
+                        _mark(i, "buy", "C&H")
+                    break
+
+        # ---------- C&H: מעקב פריצה ----------
+        if pattern_active and not breakout_confirmed and b2_p is not None:
+            if close[i] < b2_p:
+                pattern_active = False
+            elif i > 0 and close[i] > active_neckline >= close[i - 1]:
+                breakout_confirmed = True
+                if SHOW_SIGNALS:
+                    _mark(i, "buy", "C&H BO")
+
+    _out = {"markers": markers,
+            "BASE_FRESH": _fresh_series,
+            "BASE_RETEST": _retest_series}
+    if _bo_state.get("details") is not None:
+        _out["details"] = _bo_state["details"]
+    _cz = _bo_state.get("chart_zone")
+    if _cz is not None:
+        _out["hlines"] = [
+            {"price": _cz[0], "color": "#f5b301", "title": "אזור פריצה - תחתון"},
+            {"price": _cz[1], "color": "#f5b301", "title": "אזור פריצה - עליון"},
+            {"price": _cz[2], "color": "#089981", "title": "מחיר פריצה"},
+        ]
+    try:
+        if not np.all(np.isnan(vol)):
+            _vma = pd.Series(vol).rolling(BO_VOL_AVG_LEN).mean()
+            _out["VOL::VolAvg120"] = [None if np.isnan(x) else float(x)
+                                      for x in _vma.to_numpy(dtype=float)]
+    except Exception:
+        pass
+    return _out
+
+
+# ================= עטיפת סריקה =================
+# סריקה מתוזמנת: signal=True אם המניה כעת באחת מקטגוריות פריצת הבסיס
+# הפעילות, לפי חלונות האירוע של המפרט:
+# confirmed - נר האישור בתוך 5 הנרות האחרונים;
+# retest - הסטאפ פעיל כעת בבדיקת תמיכה (כולל דשדוש ארוך באזור);
+# weak - הפריצה בתוך 15 הנרות האחרונים ועוד לא היתה בדיקה;
+# waiting - הסטאפ פעיל, הירידה עוד לא הגיעה לאזור, הפריצה לא עתיקה;
+# fresh - נר הפריצה בתוך 5 הנרות האחרונים.
+# ה-details (עם category) מצורפים לכל התאמה - ההתראה מפתח לפי
+# symbol+category, ולכן מעבר קטגוריה מתריע שוב.
+def scan(df):
+    out = indicator(df)
+    n = len(df)
+    last = n - 1
+    det = out.get("details")
+    if not isinstance(det, dict):
+        return {"signal": False, "score": 0.0, "note": ""}
+    cat = det.get("category")
+    bb = int(det.get("breakout_bar") or 0)
+    if (cat == "confirmed" and det.get("trigger_bar") is not None
+            and last - int(det["trigger_bar"]) <= 4):
+        return {"signal": True, "score": 3.0,
+                "note": "פריצת בסיס מאושרת", "details": det}
+    if cat == "retest":
+        return {"signal": True, "score": 2.5,
+                "note": "פריצת בסיס בבדיקת תמיכה", "details": det}
+    if cat == "weak" and last - bb <= 14:
+        return {"signal": True, "score": 1.8,
+                "note": "פריצה חלשה", "details": det}
+    if cat == "waiting" and last - bb <= 59:
+        return {"signal": True, "score": 2.2,
+                "note": "ממתינה לבדיקת תמיכה", "details": det}
+    if cat == "fresh" and last - bb <= 4:
+        return {"signal": True, "score": 2.0, "note": "פריצה טריה",
+                "details": det}
+    return {"signal": False, "score": 0.0, "note": ""}
+'''

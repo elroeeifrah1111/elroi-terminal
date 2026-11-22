@@ -47,6 +47,7 @@ from scanner import (
     PY_SRFLIP_SCAN_EXAMPLE,
     PY_BASEBO_INDICATOR_EXAMPLE,
     PY_BASEBO_SCAN_EXAMPLE,
+    PY_BASEBO_SCHEDULED_CODE,
     PY_STRATEGY_EXAMPLE,
     _attach_market_info,
     _blank_result,
@@ -1794,11 +1795,69 @@ def _background_scan_runner():
 _scan_runner_started = False
 
 
+# --- Startup seed: the 7 Base Breakout scans ---------------------------------
+# scans.db lives next to this file on the service-local disk, so every Render
+# restart / deploy wipes it (wiped 5 nights in a row, 2026-11-14..18). On
+# every boot, recreate any missing Base Breakout scan from the v3 scheduled
+# code (PY_BASEBO_SCHEDULED_CODE - pure detector + wrapper, never the
+# multi-pattern PY_BASEBO_SCAN_EXAMPLE). Idempotent: a scan is created only
+# when no scan named "פריצת בסיס..." with the same interval exists, so
+# existing scans are never duplicated and a partial wipe is repaired too.
+# Creates rows only - it never runs a market scan; the runner picks the new
+# rows up on its first tick (~30s later) because last_run starts at 0.
+# Creation order matters: the runner iterates id DESC, so the LAST created
+# due scan runs first - intraday first, weekly/monthly last, so the monthly
+# and weekly baselines run before the intraday passes.
+_BASEBO_SEED_SPECS = [
+    ("פריצת בסיס - כל ארה\"ב, יומי",    "1d",  "1y",  1440),
+    ("פריצת בסיס - כל ארה\"ב, 5 דקות",  "5m",  "5d",  1440),
+    ("פריצת בסיס - כל ארה\"ב, 15 דקות", "15m", "1mo", 1440),
+    ("פריצת בסיס - כל ארה\"ב, 30 דקות", "30m", "1mo", 1440),
+    ("פריצת בסיס - כל ארה\"ב, שעתי",    "1h",  "1mo", 1440),
+    ("פריצת בסיס - כל ארה\"ב, שבועי",   "1wk", "10y", 10080),
+    ("פריצת בסיס - כל ארה\"ב, חודשי",   "1mo", "20y", 43200),
+]
+
+
+def _seed_basebo_scans() -> None:
+    """Recreate missing Base Breakout scans after a restart wiped scans.db.
+
+    Runs inside start_scan_runner() on every boot, before the runner thread
+    starts. Never raises: a seed failure is logged and the app keeps
+    running (the external watchdog / manual recreation remains the fallback).
+    """
+    try:
+        code = PY_BASEBO_SCHEDULED_CODE
+        if "RETEST_TOL" not in code or "_buyers_rising" not in code:
+            logger.error("Base Breakout seed skipped: scheduled code failed "
+                         "the v3 sanity check")
+            return
+        with _db_lock:
+            existing = db_list_scans()
+        have = {s["interval"] for s in existing
+                if (s.get("name") or "").startswith("פריצת בסיס")}
+        for name, interval, period, sched in _BASEBO_SEED_SPECS:
+            if interval in have:
+                continue
+            created = db_save_scan({
+                "name": name,
+                "source": {"type": "preset", "id": "all_us", "symbols": []},
+                "interval": interval, "period": period,
+                "language": "python", "code": code,
+                "schedule_minutes": sched,
+            })
+            logger.info("Seeded missing Base Breakout scan #%d (%s)",
+                        created["id"], name)
+    except Exception:
+        logger.exception("Base Breakout seed failed")
+
+
 def start_scan_runner():
     global _scan_runner_started
     if _scan_runner_started:
         return
     _scan_runner_started = True
     _get_db()  # ensure schema exists before serving
+    _seed_basebo_scans()  # recreate scans wiped by a restart, if any
     t = threading.Thread(target=_background_scan_runner, daemon=True)
     t.start()
