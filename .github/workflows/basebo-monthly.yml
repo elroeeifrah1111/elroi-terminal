@@ -1,0 +1,84 @@
+# Base Breakout scan - monthly timeframe (1mo, 20y of monthly candles).
+# Same design as basebo-daily.yml: actions_scan.py does the pass,
+# findings are POSTed to the terminal ingest endpoint and committed
+# back to findings/ as the durable record.
+#
+# Cron is UTC: the 1st of the month, 07:00 - the previous month's
+# candle is complete.
+name: Base Breakout - Monthly
+
+on:
+  schedule:
+    - cron: "0 7 1 * *"
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: "Universe preset (test runs: sp500)"
+        type: choice
+        options: [all_us, sp500, nasdaq100]
+        default: all_us
+
+permissions:
+  contents: write
+
+concurrency:
+  group: basebo-monthly
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        chunk: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scan chunk
+        env:
+          INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
+        run: |
+          python actions_scan.py \
+            --interval 1mo \
+            --period 20y \
+            --universe "${{ inputs.universe || 'all_us' }}" \
+            --chunk-index ${{ matrix.chunk }} \
+            --chunks 4
+
+      # Always pull --rebase BEFORE push (commits may land on main
+      # mid-run from the parallel matrix jobs) - see basebo-daily.yml.
+      - name: Commit findings
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          git add findings/
+          if git diff --cached --quiet; then
+            echo "No findings changes to commit."
+            exit 0
+          fi
+          git commit -m "Base breakout findings: 1mo chunk ${{ matrix.chunk }} (run ${{ github.run_id }})"
+          ok=0
+          for i in 1 2 3 4 5; do
+            if git pull --rebase origin main && git push origin main; then
+              ok=1
+              break
+            fi
+            echo "Push attempt $i failed - rebasing and retrying..."
+            sleep 15
+          done
+          [ "$ok" -eq 1 ]
