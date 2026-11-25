@@ -1,13 +1,85 @@
 {
  "interval": "1mo",
  "period": "20y",
- "universe": "sp500",
- "run_id": "45604568174",
+ "universe": "all_us",
+ "run_id": "45618696861",
  "chunk_index": 3,
  "chunks": 4,
- "generated_at": "2026-11-25T11:28:05Z",
- "scanned": 125,
- "missing": 0,
- "elapsed_seconds": 29.2,
- "findings": []
+ "generated_at": "2026-11-25T13:00:38Z",
+ "scanned": 1722,
+ "missing": 7,
+ "elapsed_seconds": 190.1,
+ "findings": [
+  {
+   "symbol": "TGB",
+   "price": 5.44,
+   "change_pct": -26.09,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 1.529,
+    "zone_high": 2.026,
+    "zone_break_bar": 94,
+    "breakout_bar": 207,
+    "breakout_date": "2024-03-01",
+    "breakout_price": 2.17,
+    "breakout_volume": 56407100.0,
+    "prev_candle_volume": 18407500.0,
+    "vol_avg120": 19665327.5,
+    "vol_ratio120": 2.868,
+    "vol_window_start": 87,
+    "swing_high_bar": 209,
+    "swing_high_price": 3.15,
+    "swing_low_bar": 220,
+    "swing_low_price": 1.67,
+    "low_candle_volume": 363325700.0,
+    "up_steps": [
+     69697125.0,
+     213197950.0,
+     153422025.0,
+     143817050.0,
+     105748133.33
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 209,
+    "retest_end_bar": 220,
+    "interval": "1mo",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 56,407,100 מעל הנר הקודם 18,407,500"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  }
+ ]
 }
