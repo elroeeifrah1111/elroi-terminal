@@ -1,0 +1,84 @@
+{
+ "interval": "15m",
+ "period": "1mo",
+ "universe": "all_us",
+ "run_id": "45618830962",
+ "chunk_index": 2,
+ "chunks": 4,
+ "generated_at": "2026-11-25T13:07:10Z",
+ "scanned": 1694,
+ "missing": 35,
+ "elapsed_seconds": 335.4,
+ "findings": [
+  {
+   "symbol": "CD",
+   "price": 5.9,
+   "change_pct": -1.99,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 5.3835,
+    "zone_high": 5.5765,
+    "zone_break_bar": 247,
+    "breakout_bar": 556,
+    "breakout_date": "2026-11-24",
+    "breakout_price": 5.61,
+    "breakout_volume": 9301.0,
+    "prev_candle_volume": 5155.0,
+    "vol_avg120": 11405.08,
+    "vol_ratio120": 0.816,
+    "vol_window_start": 436,
+    "swing_high_bar": 557,
+    "swing_high_price": 5.82,
+    "swing_low_bar": 559,
+    "swing_low_price": 5.63,
+    "low_candle_volume": 14801.0,
+    "up_steps": [
+     13890.0,
+     13725.0,
+     16268.5,
+     14234.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 557,
+    "retest_end_bar": 559,
+    "interval": "15m",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 9,301 מעל הנר הקודם 5,155"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  }
+ ]
+}
