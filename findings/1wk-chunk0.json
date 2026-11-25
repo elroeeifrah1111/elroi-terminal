@@ -1,0 +1,1241 @@
+{
+ "interval": "1wk",
+ "period": "10y",
+ "universe": "all_us",
+ "run_id": "45618866227",
+ "chunk_index": 0,
+ "chunks": 4,
+ "generated_at": "2026-11-25T13:07:32Z",
+ "scanned": 1723,
+ "missing": 7,
+ "elapsed_seconds": 285.9,
+ "findings": [
+  {
+   "symbol": "AMPL",
+   "price": 16.98,
+   "change_pct": 4.81,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "gap_up": false,
+    "zone_low": 10.6007,
+    "zone_high": 16.2726,
+    "zone_break_bar": 64,
+    "breakout_bar": 264,
+    "breakout_date": "2026-10-19",
+    "breakout_price": 17.42,
+    "breakout_volume": 8936100.0,
+    "prev_candle_volume": 7052700.0,
+    "vol_avg120": 6718160.0,
+    "vol_ratio120": 1.33,
+    "vol_window_start": 144,
+    "swing_high_bar": 266,
+    "swing_high_price": 18.85,
+    "swing_low_bar": 268,
+    "swing_low_price": 16.07,
+    "low_candle_volume": 10934800.0,
+    "up_steps": [],
+    "down_steps": [
+     13725000.0,
+     10934800.0
+    ],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 266,
+    "retest_end_bar": 268,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 8,936,100 מעל הנר הקודם 7,052,700"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "צ'אנק עליה: עוד אין מספיק נרות קונים לקריאה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "AQST",
+   "price": 3.92,
+   "change_pct": 13.29,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": true,
+    "zone_low": 3.2438,
+    "zone_high": 4.2595,
+    "zone_break_bar": 60,
+    "breakout_bar": 403,
+    "breakout_date": "2026-04-13",
+    "breakout_price": 4.32,
+    "breakout_volume": 5088800.0,
+    "prev_candle_volume": 5037100.0,
+    "vol_avg120": 10385364.17,
+    "vol_ratio120": 0.49,
+    "vol_window_start": 283,
+    "swing_high_bar": 404,
+    "swing_high_price": 4.42,
+    "swing_low_bar": 433,
+    "swing_low_price": 3.37,
+    "low_candle_volume": 15760900.0,
+    "up_steps": [
+     5745100.0,
+     8520966.67,
+     20944100.0,
+     12848550.0
+    ],
+    "down_steps": [
+     29595000.0,
+     33141200.0,
+     25623900.0,
+     33140100.0,
+     38676300.0
+    ],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 404,
+    "retest_end_bar": 433,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 5,088,800 מעל הנר הקודם 5,037,100"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "הפריצה היתה בגאפ למעלה - רוב הגאפים נסגרים מתישהו (דגל אזהרה)"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "BJRI",
+   "price": 60.55,
+   "change_pct": 5.3,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 34.0683,
+    "zone_high": 37.0017,
+    "zone_break_bar": 170,
+    "breakout_bar": 489,
+    "breakout_date": "2026-04-06",
+    "breakout_price": 37.4,
+    "breakout_volume": 1690200.0,
+    "prev_candle_volume": 1265400.0,
+    "vol_avg120": 1965181.67,
+    "vol_ratio120": 0.86,
+    "vol_window_start": 369,
+    "swing_high_bar": 489,
+    "swing_high_price": 39.68,
+    "swing_low_bar": 490,
+    "swing_low_price": 36.25,
+    "low_candle_volume": 1580900.0,
+    "up_steps": [
+     1999966.67,
+     1866500.0,
+     3000433.33,
+     3017550.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 489,
+    "retest_end_bar": 490,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 1,690,200 מעל הנר הקודם 1,265,400"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה + פתיל עליון ארוך - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "CDNA",
+   "price": 77.83,
+   "change_pct": 11.19,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 17.0381,
+    "zone_high": 20.8699,
+    "zone_break_bar": 303,
+    "breakout_bar": 490,
+    "breakout_date": "2026-04-13",
+    "breakout_price": 21.42,
+    "breakout_volume": 6058700.0,
+    "prev_candle_volume": 3145300.0,
+    "vol_avg120": 4663878.33,
+    "vol_ratio120": 1.299,
+    "vol_window_start": 370,
+    "swing_high_bar": 490,
+    "swing_high_price": 23.24,
+    "swing_low_bar": 492,
+    "swing_low_price": 18.15,
+    "low_candle_volume": 5148400.0,
+    "up_steps": [
+     4130300.0,
+     5191200.0,
+     6348040.0,
+     6731060.0,
+     7930100.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 490,
+    "retest_end_bar": 492,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 6,058,700 מעל הנר הקודם 3,145,300"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "COGT",
+   "price": 33.01,
+   "change_pct": 23.54,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 11.5204,
+    "zone_high": 16.0263,
+    "zone_break_bar": 62,
+    "breakout_bar": 393,
+    "breakout_date": "2025-10-06",
+    "breakout_price": 16.27,
+    "breakout_volume": 10740200.0,
+    "prev_candle_volume": 9715500.0,
+    "vol_avg120": 7363765.0,
+    "vol_ratio120": 1.459,
+    "vol_window_start": 273,
+    "swing_high_bar": 395,
+    "swing_high_price": 17.15,
+    "swing_low_bar": 397,
+    "swing_low_price": 13.78,
+    "low_candle_volume": 15841200.0,
+    "up_steps": [
+     9697100.0,
+     31176750.0,
+     14463900.0,
+     15512000.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 395,
+    "retest_end_bar": 397,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 10,740,200 מעל הנר הקודם 9,715,500"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "EVC",
+   "price": 8.99,
+   "change_pct": 4.05,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 2.324,
+    "zone_high": 2.5535,
+    "zone_break_bar": 103,
+    "breakout_bar": 467,
+    "breakout_date": "2025-11-03",
+    "breakout_price": 2.76,
+    "breakout_volume": 14809800.0,
+    "prev_candle_volume": 742400.0,
+    "vol_avg120": 1914198.33,
+    "vol_ratio120": 7.737,
+    "vol_window_start": 347,
+    "swing_high_bar": 467,
+    "swing_high_price": 3.01,
+    "swing_low_bar": 469,
+    "swing_low_price": 2.45,
+    "low_candle_volume": 1987300.0,
+    "up_steps": [
+     4213480.0,
+     1608180.0,
+     1402220.0,
+     22907260.0,
+     9900700.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 467,
+    "retest_end_bar": 469,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 14,809,800 מעל הנר הקודם 742,400"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "INCY",
+   "price": 123.61,
+   "change_pct": 7.83,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 78.7734,
+    "zone_high": 84.1306,
+    "zone_break_bar": 71,
+    "breakout_bar": 455,
+    "breakout_date": "2025-08-11",
+    "breakout_price": 86.92,
+    "breakout_volume": 10730200.0,
+    "prev_candle_volume": 7962900.0,
+    "vol_avg120": 9879586.67,
+    "vol_ratio120": 1.086,
+    "vol_window_start": 335,
+    "swing_high_bar": 456,
+    "swing_high_price": 87.24,
+    "swing_low_bar": 461,
+    "swing_low_price": 81.09,
+    "low_candle_volume": 7230600.0,
+    "up_steps": [
+     9543633.33,
+     12923533.33,
+     7525016.67,
+     8544600.0,
+     10095533.33
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 456,
+    "retest_end_bar": 461,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 10,730,200 מעל הנר הקודם 7,962,900"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה + פתיל עליון ארוך - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "KRMD",
+   "price": 3.43,
+   "change_pct": 7.52,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "gap_up": false,
+    "zone_low": 2.7722,
+    "zone_high": 3.6838,
+    "zone_break_bar": 251,
+    "breakout_bar": 520,
+    "breakout_date": "2026-11-09",
+    "breakout_price": 3.7,
+    "breakout_volume": 1658500.0,
+    "prev_candle_volume": 705500.0,
+    "vol_avg120": 759925.0,
+    "vol_ratio120": 2.182,
+    "vol_window_start": 400,
+    "swing_high_bar": 520,
+    "swing_high_price": 4.07,
+    "swing_low_bar": 521,
+    "swing_low_price": 3.17,
+    "low_candle_volume": 1333400.0,
+    "up_steps": [],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 520,
+    "retest_end_bar": 521,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 1,658,500 מעל הנר הקודם 705,500"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "צ'אנק עליה: עוד אין מספיק נרות קונים לקריאה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "MCS",
+   "price": 26.39,
+   "change_pct": 2.8,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 20.4392,
+    "zone_high": 21.7008,
+    "zone_break_bar": 172,
+    "breakout_bar": 498,
+    "breakout_date": "2026-06-08",
+    "breakout_price": 22.37,
+    "breakout_volume": 1079000.0,
+    "prev_candle_volume": 955800.0,
+    "vol_avg120": 1496612.5,
+    "vol_ratio120": 0.721,
+    "vol_window_start": 378,
+    "swing_high_bar": 500,
+    "swing_high_price": 24.82,
+    "swing_low_bar": 502,
+    "swing_low_price": 21.55,
+    "low_candle_volume": 852200.0,
+    "up_steps": [
+     1118200.0,
+     1706400.0,
+     1591650.0,
+     2780500.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 500,
+    "retest_end_bar": 502,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 1,079,000 מעל הנר הקודם 955,800"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה + פתיל עליון ארוך - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "OPK",
+   "price": 1.66,
+   "change_pct": 5.73,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 1.2972,
+    "zone_high": 1.5188,
+    "zone_break_bar": 175,
+    "breakout_bar": 510,
+    "breakout_date": "2026-08-31",
+    "breakout_price": 1.64,
+    "breakout_volume": 22456900.0,
+    "prev_candle_volume": 12176300.0,
+    "vol_avg120": 15971528.33,
+    "vol_ratio120": 1.406,
+    "vol_window_start": 390,
+    "swing_high_bar": 510,
+    "swing_high_price": 1.73,
+    "swing_low_bar": 516,
+    "swing_low_price": 1.3,
+    "low_candle_volume": 71664300.0,
+    "up_steps": [
+     17685000.0,
+     43258300.0,
+     20748650.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 510,
+    "retest_end_bar": 516,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 22,456,900 מעל הנר הקודם 12,176,300"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה + פתיל עליון ארוך - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "PLX",
+   "price": 3.17,
+   "change_pct": 9.31,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 1.8261,
+    "zone_high": 2.3039,
+    "zone_break_bar": 240,
+    "breakout_bar": 479,
+    "breakout_date": "2026-01-26",
+    "breakout_price": 2.34,
+    "breakout_volume": 6297600.0,
+    "prev_candle_volume": 2245900.0,
+    "vol_avg120": 2722340.83,
+    "vol_ratio120": 2.313,
+    "vol_window_start": 359,
+    "swing_high_bar": 483,
+    "swing_high_price": 3.19,
+    "swing_low_bar": 493,
+    "swing_low_price": 1.88,
+    "low_candle_volume": 5723600.0,
+    "up_steps": [
+     6958616.67,
+     3522216.67,
+     3196500.0,
+     3530266.67,
+     8020708.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 483,
+    "retest_end_bar": 493,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 6,297,600 מעל הנר הקודם 2,245,900"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "REI",
+   "price": 1.0,
+   "change_pct": -3.85,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 0.8626,
+    "zone_high": 1.104,
+    "zone_break_bar": 196,
+    "breakout_bar": 479,
+    "breakout_date": "2026-01-26",
+    "breakout_price": 1.19,
+    "breakout_volume": 24328700.0,
+    "prev_candle_volume": 8987700.0,
+    "vol_avg120": 10363420.83,
+    "vol_ratio120": 2.348,
+    "vol_window_start": 359,
+    "swing_high_bar": 493,
+    "swing_high_price": 2.0,
+    "swing_low_bar": 522,
+    "swing_low_price": 0.99,
+    "low_candle_volume": 7516698.0,
+    "up_steps": [
+     25424550.0,
+     15197900.0,
+     32509400.0,
+     20371900.0,
+     27734900.0
+    ],
+    "down_steps": [
+     109548400.0,
+     95750600.0,
+     62109700.0,
+     47172500.0,
+     19355398.0
+    ],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 493,
+    "retest_end_bar": 522,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 24,328,700 מעל הנר הקודם 8,987,700"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "SHIP",
+   "price": 14.54,
+   "change_pct": 4.98,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 4.9289,
+    "zone_high": 16.7403,
+    "zone_break_bar": 195,
+    "breakout_bar": 505,
+    "breakout_date": "2026-07-27",
+    "breakout_price": 17.14,
+    "breakout_volume": 1626200.0,
+    "prev_candle_volume": 1012300.0,
+    "vol_avg120": 1036474.17,
+    "vol_ratio120": 1.569,
+    "vol_window_start": 385,
+    "swing_high_bar": 506,
+    "swing_high_price": 18.11,
+    "swing_low_bar": 521,
+    "swing_low_price": 13.77,
+    "low_candle_volume": 1633300.0,
+    "up_steps": [
+     1626200.0,
+     1281400.0,
+     1491200.0,
+     2019000.0,
+     2353900.0
+    ],
+    "down_steps": [
+     3347200.0,
+     4056700.0,
+     3876200.0,
+     3088700.0
+    ],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 506,
+    "retest_end_bar": 521,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 1,626,200 מעל הנר הקודם 1,012,300"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "SMMT",
+   "price": 10.5,
+   "change_pct": 5.53,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 1.3502,
+    "zone_high": 2.2938,
+    "zone_break_bar": 103,
+    "breakout_bar": 343,
+    "breakout_date": "2023-06-19",
+    "breakout_price": 2.65,
+    "breakout_volume": 31011700.0,
+    "prev_candle_volume": 15304200.0,
+    "vol_avg120": 8344620.0,
+    "vol_ratio120": 3.716,
+    "vol_window_start": 223,
+    "swing_high_bar": 343,
+    "swing_high_price": 2.93,
+    "swing_low_bar": 354,
+    "swing_low_price": 1.52,
+    "low_candle_volume": 4012200.0,
+    "up_steps": [
+     8200990.0,
+     10235170.0,
+     18802530.0,
+     22574960.0,
+     13503170.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 343,
+    "retest_end_bar": 354,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 31,011,700 מעל הנר הקודם 15,304,200"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "FOSL",
+   "price": 7.98,
+   "change_pct": 10.68,
+   "signal": true,
+   "score": 1.8,
+   "note": "פריצה חלשה",
+   "error": "",
+   "details": {
+    "category": "weak",
+    "quality": "weak",
+    "gap_up": true,
+    "zone_low": 4.9442,
+    "zone_high": 5.9238,
+    "zone_break_bar": 170,
+    "breakout_bar": 513,
+    "breakout_date": "2026-09-21",
+    "breakout_price": 6.2,
+    "breakout_volume": 3884300.0,
+    "prev_candle_volume": 3673900.0,
+    "vol_avg120": 3273809.17,
+    "vol_ratio120": 1.186,
+    "vol_window_start": 393,
+    "swing_high_bar": 520,
+    "swing_high_price": 10.55,
+    "swing_low_bar": 521,
+    "swing_low_price": 7.08,
+    "low_candle_volume": 6051200.0,
+    "up_steps": [
+     4382300.0,
+     3346800.0,
+     9841250.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 520,
+    "retest_end_bar": 521,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 3,884,300 מעל הנר הקודם 3,673,900"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה + פתיל עליון ארוך - פריצה חלשה"
+     },
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "הפריצה היתה בגאפ למעלה - רוב הגאפים נסגרים מתישהו (דגל אזהרה)"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "הירידה עוד לא הגיעה לאזור - ממתין לבדיקת תמיכה"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "PGNY",
+   "price": 36.48,
+   "change_pct": 2.16,
+   "signal": true,
+   "score": 1.8,
+   "note": "פריצה חלשה",
+   "error": "",
+   "details": {
+    "category": "weak",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 23.9271,
+    "zone_high": 27.5596,
+    "zone_break_bar": 250,
+    "breakout_bar": 363,
+    "breakout_date": "2026-10-05",
+    "breakout_price": 27.93,
+    "breakout_volume": 6576200.0,
+    "prev_candle_volume": 6140000.0,
+    "vol_avg120": 7317594.17,
+    "vol_ratio120": 0.899,
+    "vol_window_start": 243,
+    "swing_high_bar": 369,
+    "swing_high_price": 37.21,
+    "swing_low_bar": 370,
+    "swing_low_price": 35.27,
+    "low_candle_volume": 2518013.0,
+    "up_steps": [
+     6576200.0,
+     4038300.0,
+     3583100.0,
+     7962300.0,
+     5620800.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 369,
+    "retest_end_bar": 370,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 6,576,200 מעל הנר הקודם 6,140,000"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "הירידה עוד לא הגיעה לאזור - ממתין לבדיקת תמיכה"
+     }
+    ]
+   }
+  },
+  {
+   "symbol": "XNCR",
+   "price": 38.18,
+   "change_pct": 14.79,
+   "signal": true,
+   "score": 1.8,
+   "note": "פריצה חלשה",
+   "error": "",
+   "details": {
+    "category": "weak",
+    "quality": "weak",
+    "gap_up": true,
+    "zone_low": 25.9967,
+    "zone_high": 28.9733,
+    "zone_break_bar": 283,
+    "breakout_bar": 518,
+    "breakout_date": "2026-10-26",
+    "breakout_price": 29.82,
+    "breakout_volume": 14609100.0,
+    "prev_candle_volume": 6794800.0,
+    "vol_avg120": 4082720.83,
+    "vol_ratio120": 3.578,
+    "vol_window_start": 398,
+    "swing_high_bar": 520,
+    "swing_high_price": 40.6,
+    "swing_low_bar": 521,
+    "swing_low_price": 33.12,
+    "low_candle_volume": 5830000.0,
+    "up_steps": [
+     14609100.0,
+     8413200.0,
+     6422000.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 520,
+    "retest_end_bar": 521,
+    "interval": "1wk",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 14,609,100 מעל הנר הקודם 6,794,800"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה + פתיל עליון ארוך - פריצה חלשה"
+     },
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "הפריצה היתה בגאפ למעלה - רוב הגאפים נסגרים מתישהו (דגל אזהרה)"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "הירידה עוד לא הגיעה לאזור - ממתין לבדיקת תמיכה"
+     }
+    ]
+   }
+  }
+ ]
+}
