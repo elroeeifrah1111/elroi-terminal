@@ -1,0 +1,95 @@
+# Base Breakout scans - daily-due timeframes (1d, 5m, 15m, 30m, 1h).
+#
+# The heavy passes run HERE, not inside the Render free-tier service
+# (it sleeps when idle and wipes its local DB on restarts). Each matrix
+# job scans one chunk of the universe with actions_scan.py, POSTs its
+# findings to the terminal's ingest endpoint (which stores them and
+# Telegram-notifies only new symbol+category keys), and commits its
+# findings JSON back to the repo as the durable record.
+#
+# Cron is UTC: 22:30 Mon-Fri = 00:30 IST, after the US market close.
+name: Base Breakout - Daily
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: "Universe preset (test runs: sp500)"
+        type: choice
+        options: [all_us, sp500, nasdaq100]
+        default: all_us
+
+permissions:
+  contents: write
+
+concurrency:
+  group: basebo-daily
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        interval: ["1d", "5m", "15m", "30m", "1h"]
+        chunk: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scan chunk
+        env:
+          INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
+        run: |
+          case "${{ matrix.interval }}" in
+            1d) PERIOD=1y ;;
+            5m) PERIOD=5d ;;
+            *)  PERIOD=1mo ;;
+          esac
+          python actions_scan.py \
+            --interval "${{ matrix.interval }}" \
+            --period "$PERIOD" \
+            --universe "${{ inputs.universe || 'all_us' }}" \
+            --chunk-index ${{ matrix.chunk }} \
+            --chunks 4
+
+      # AGENTS.md lesson: a run that ends with git push FAILS if commits
+      # land on main mid-run - always pull --rebase BEFORE pushing, and
+      # retry the pair a few times (20 matrix jobs commit in parallel;
+      # each touches only its own findings file, so rebases are clean).
+      - name: Commit findings
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          git add findings/
+          if git diff --cached --quiet; then
+            echo "No findings changes to commit."
+            exit 0
+          fi
+          git commit -m "Base breakout findings: ${{ matrix.interval }} chunk ${{ matrix.chunk }} (run ${{ github.run_id }})"
+          ok=0
+          for i in 1 2 3 4 5; do
+            if git pull --rebase origin main && git push origin main; then
+              ok=1
+              break
+            fi
+            echo "Push attempt $i failed - rebasing and retrying..."
+            sleep 15
+          done
+          [ "$ok" -eq 1 ]
