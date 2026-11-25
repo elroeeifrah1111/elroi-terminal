@@ -1,13 +1,85 @@
 {
  "interval": "1mo",
  "period": "20y",
- "universe": "sp500",
- "run_id": "45604568174",
+ "universe": "all_us",
+ "run_id": "45618696861",
  "chunk_index": 0,
  "chunks": 4,
- "generated_at": "2026-11-25T11:28:03Z",
- "scanned": 126,
- "missing": 0,
- "elapsed_seconds": 25.1,
- "findings": []
+ "generated_at": "2026-11-25T13:01:06Z",
+ "scanned": 1724,
+ "missing": 6,
+ "elapsed_seconds": 207.8,
+ "findings": [
+  {
+   "symbol": "NGL",
+   "price": 13.45,
+   "change_pct": -18.09,
+   "signal": true,
+   "score": 1.8,
+   "note": "פריצה חלשה",
+   "error": "",
+   "details": {
+    "category": "weak",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 5.7021,
+    "zone_high": 7.0679,
+    "zone_break_bar": 105,
+    "breakout_bar": 173,
+    "breakout_date": "2025-11-01",
+    "breakout_price": 9.83,
+    "breakout_volume": 10747100.0,
+    "prev_candle_volume": 6107900.0,
+    "vol_avg120": 20410111.67,
+    "vol_ratio120": 0.527,
+    "vol_window_start": 53,
+    "swing_high_bar": 183,
+    "swing_high_price": 19.06,
+    "swing_low_bar": 185,
+    "swing_low_price": 12.81,
+    "low_candle_volume": 4095699.0,
+    "up_steps": [
+     8327700.0,
+     8223300.0,
+     5258600.0,
+     5264800.0,
+     5629100.0
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 183,
+    "retest_end_bar": 185,
+    "interval": "1mo",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 10,747,100 מעל הנר הקודם 6,107,900"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "הירידה עוד לא הגיעה לאזור - ממתין לבדיקת תמיכה"
+     }
+    ]
+   }
+  }
+ ]
 }
