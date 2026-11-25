@@ -71,7 +71,7 @@ jobs:
             echo "No findings changes to commit."
             exit 0
           fi
-          git commit -m "Base breakout findings: 1wk chunk ${{ matrix.chunk }} (run ${{ github.run_id }})"
+          git commit -m "[skip render] Base breakout findings: 1wk chunk ${{ matrix.chunk }} (run ${{ github.run_id }})"
           ok=0
           for i in 1 2 3 4 5; do
             if git pull --rebase origin main && git push origin main; then
