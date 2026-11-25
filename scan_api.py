@@ -17,6 +17,7 @@ Mount from server.py:
 
 import asyncio
 import gc
+import hmac
 import json
 import logging
 import multiprocessing
@@ -36,7 +37,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from scanner import (
@@ -551,6 +552,22 @@ def _get_db() -> sqlite3.Connection:
                 _db_conn.execute(
                     "ALTER TABLE scans ADD COLUMN progress_json "
                     "TEXT NOT NULL DEFAULT '{}'")
+            # Staging for findings computed outside the server (GitHub
+            # Actions ingest): one row per arrived matrix chunk, plus a
+            # chunk_index = -1 meta row holding the run's notified keys.
+            _db_conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ingest_staging (
+                    scan_id INTEGER NOT NULL,
+                    run_id TEXT NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    chunks INTEGER NOT NULL DEFAULT 1,
+                    findings_json TEXT NOT NULL DEFAULT '[]',
+                    updated REAL NOT NULL DEFAULT 0,
+                    PRIMARY KEY (scan_id, run_id, chunk_index)
+                )
+                """
+            )
             _db_conn.commit()
     return _db_conn
 
@@ -1544,6 +1561,160 @@ def api_run_saved_scan(scan_id: int):
         raise HTTPException(status_code=500, detail=f"הסריקה נכשלה: {e}")
     db_scan_touch(scan_id, out["matched_symbols"], out.get("results"))
     return out
+
+
+# ----------------------------------------------------------------------------
+# Ingest — findings computed OUTSIDE the server (GitHub Actions)
+# ----------------------------------------------------------------------------
+# The Render free-tier service sleeps when idle and wipes scans.db on
+# restarts, so the heavy scheduled passes moved to GitHub Actions cron
+# (actions_scan.py in this repo). The runner POSTs each matrix chunk's
+# findings here; chunks of one run are staged in ingest_staging and
+# merged when the last chunk lands, then stored exactly like an
+# in-server pass (db_scan_touch) and Telegram-notified ONLY for keys
+# that were not in the previously stored set - the same dedupe rule as
+# _execute_scheduled_scan (_match_key: "SYM|category"; a category
+# transition notifies again). Guarded by a shared secret header
+# (X-Ingest-Secret) compared against the INGEST_SECRET env var; when
+# the env var is unset the endpoint is disabled.
+class ScanIngestRequest(BaseModel):
+    interval: str
+    run_id: str = ""
+    chunk_index: int = 0
+    chunks: int = 1
+    findings: List[Dict] = []
+    scanned: int = 0
+
+
+def _ingest_find_scan(interval: str) -> Optional[Dict]:
+    """The Base Breakout scan for this interval (seeded at startup);
+    falls back to any scan with the interval."""
+    scans = db_list_scans()
+    named = [s for s in scans if s["interval"] == interval
+             and (s.get("name") or "").startswith("פריצת בסיס")]
+    if named:
+        return named[0]
+    plain = [s for s in scans if s["interval"] == interval]
+    return plain[0] if plain else None
+
+
+def _ingest_stage(scan_id: int, run_id: str, chunk_index: int,
+                  chunks: int, payload: list) -> None:
+    """Upsert one staged row: a chunk's findings (chunk_index >= 0) or
+    the run's notified-key list (chunk_index == -1 meta row)."""
+    conn = _get_db()
+    with _db_lock:
+        conn.execute(
+            "INSERT INTO ingest_staging (scan_id, run_id, chunk_index, "
+            "chunks, findings_json, updated) VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(scan_id, run_id, chunk_index) DO UPDATE SET "
+            "chunks=excluded.chunks, findings_json=excluded.findings_json, "
+            "updated=excluded.updated",
+            (scan_id, run_id, chunk_index, chunks,
+             json.dumps(payload, ensure_ascii=False), time.time()))
+        conn.commit()
+
+
+def _ingest_staged(scan_id: int, run_id: str):
+    """Read a run's staged state: ({chunk_index: findings}, chunks_total,
+    [notified keys])."""
+    conn = _get_db()
+    with _db_lock:
+        rows = conn.execute(
+            "SELECT chunk_index, chunks, findings_json FROM ingest_staging "
+            "WHERE scan_id = ? AND run_id = ?",
+            (scan_id, run_id)).fetchall()
+    staged: Dict[int, list] = {}
+    notified_keys: List[str] = []
+    total = 0
+    for r in rows:
+        total = max(total, r["chunks"] or 0)
+        try:
+            payload = json.loads(r["findings_json"] or "[]")
+        except Exception:
+            payload = []
+        if r["chunk_index"] == -1:
+            notified_keys = payload if isinstance(payload, list) else []
+        else:
+            staged[r["chunk_index"]] = payload if isinstance(payload, list) else []
+    return staged, total, notified_keys
+
+
+@router.post("/api/scans/ingest")
+def api_scan_ingest(req: ScanIngestRequest, request: Request):
+    secret = os.getenv("INGEST_SECRET", "").strip()
+    if not secret:
+        raise HTTPException(status_code=503,
+                            detail="ingest disabled (INGEST_SECRET unset)")
+    provided = request.headers.get("x-ingest-secret", "")
+    if not hmac.compare_digest(provided, secret):
+        raise HTTPException(status_code=403, detail="invalid ingest secret")
+    scan = _ingest_find_scan(req.interval)
+    if scan is None:
+        raise HTTPException(status_code=404,
+                            detail=f"no scan for interval {req.interval}")
+    run_id = req.run_id or f"single-{int(time.time())}"
+    chunks_total = max(1, req.chunks or 1)
+    chunk_index = req.chunk_index or 0
+
+    findings = [f for f in (req.findings or [])
+                if isinstance(f, dict) and f.get("symbol")]
+    for f in findings:
+        f.setdefault("signal", True)
+
+    # Notify baseline: keys of the previously stored set, plus every key
+    # already notified during THIS run (staged meta row) - so a retried
+    # or re-POSTed chunk never notifies twice.
+    prev_keys = {_match_key(r) for r in (scan.get("last_results") or [])
+                 if isinstance(r, dict) and r.get("symbol")}
+    _, _, already = _ingest_staged(scan["id"], run_id)
+    known = prev_keys | set(already)
+    fresh = [f for f in findings if _match_key(f) not in known]
+
+    _ingest_stage(scan["id"], run_id, chunk_index, chunks_total, findings)
+    if fresh:
+        try:
+            _notify_scan_matches(scan, fresh)
+        except Exception:
+            logger.exception("ingest #%d: notify failed", scan["id"])
+        _ingest_stage(scan["id"], run_id, -1, chunks_total,
+                      sorted(known | {_match_key(f) for f in fresh}))
+
+    staged, total, _ = _ingest_staged(scan["id"], run_id)
+    total = total or chunks_total
+    finalized = False
+    stored = 0
+    if len(staged) >= total:
+        merged: Dict[str, Dict] = {}
+        for idx in sorted(staged):
+            for f in staged[idx]:
+                if isinstance(f, dict) and f.get("symbol"):
+                    merged[_match_key(f)] = f
+        results = sorted(merged.values(),
+                         key=lambda r: (-(r.get("score") or 0), r["symbol"]))
+        db_scan_touch(scan["id"], [r["symbol"] for r in results], results)
+        db_scan_set_notified(scan["id"],
+                             sorted(_match_key(r) for r in results))
+        try:
+            db_scan_set_progress(scan["id"], total, total, "done")
+        except Exception:
+            logger.exception("ingest #%d: progress persist failed",
+                             scan["id"])
+        conn = _get_db()
+        with _db_lock:
+            conn.execute("DELETE FROM ingest_staging WHERE scan_id = ? "
+                         "AND run_id = ?", (scan["id"], run_id))
+            conn.commit()
+        finalized = True
+        stored = len(results)
+    logger.info("ingest scan #%d (%s) run %s: chunk %d/%d, %d findings, "
+                "%d new notified, finalized=%s",
+                scan["id"], req.interval, run_id, chunk_index,
+                chunks_total, len(findings), len(fresh), finalized)
+    return {"ok": True, "scan_id": scan["id"], "interval": req.interval,
+            "received": len(findings), "notified": len(fresh),
+            "chunks_seen": len(staged), "chunks_total": total,
+            "finalized": finalized, "stored": stored}
 
 
 # ----------------------------------------------------------------------------
