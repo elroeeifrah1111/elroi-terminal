@@ -2,12 +2,12 @@
  "interval": "1mo",
  "period": "20y",
  "universe": "sp500",
- "run_id": "45599286961",
+ "run_id": "45604568174",
  "chunk_index": 3,
  "chunks": 4,
- "generated_at": "2026-11-25T10:54:29Z",
+ "generated_at": "2026-11-25T11:28:05Z",
  "scanned": 125,
  "missing": 0,
- "elapsed_seconds": 24.1,
+ "elapsed_seconds": 29.2,
  "findings": []
 }
