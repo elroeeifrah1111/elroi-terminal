@@ -31,7 +31,7 @@ import time
 import uuid
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from io import StringIO
 from typing import Dict, List, Optional, Tuple
 
@@ -661,14 +661,19 @@ def db_delete_scan(scan_id: int) -> bool:
 
 
 def db_scan_touch(scan_id: int, matches: List[str],
-                  results: Optional[List[Dict]] = None) -> None:
+                  results: Optional[List[Dict]] = None,
+                  run_at: Optional[float] = None) -> None:
+    """Persist a pass's outcome. last_run defaults to now; run_at pins it
+    to the pass's own timestamp (boot hydration restores an Actions run
+    whose generated_at predates the boot)."""
     conn = _get_db()
+    ts = time.time() if run_at is None else float(run_at)
     with _db_lock:
         if results is None:
             conn.execute(
                 "UPDATE scans SET last_run = ?, last_matches_json = ? "
                 "WHERE id = ?",
-                (time.time(), json.dumps(matches or []), scan_id),
+                (ts, json.dumps(matches or []), scan_id),
             )
         else:
             slim = [{k: r.get(k) for k in ("symbol", "price", "change_pct",
@@ -677,7 +682,7 @@ def db_scan_touch(scan_id: int, matches: List[str],
             conn.execute(
                 "UPDATE scans SET last_run = ?, last_matches_json = ?, "
                 "last_results_json = ? WHERE id = ?",
-                (time.time(), json.dumps(matches or []),
+                (ts, json.dumps(matches or []),
                  json.dumps(slim, ensure_ascii=False), scan_id),
             )
         conn.commit()
@@ -1974,8 +1979,10 @@ _scan_runner_started = False
 # multi-pattern PY_BASEBO_SCAN_EXAMPLE). Idempotent: a scan is created only
 # when no scan named "פריצת בסיס..." with the same interval exists, so
 # existing scans are never duplicated and a partial wipe is repaired too.
-# Creates rows only - it never runs a market scan; the runner picks the new
-# rows up on its first tick (~30s later) because last_run starts at 0.
+# Creates rows only - it never runs a market scan. Since 2026-11-25 the
+# passes themselves execute on GitHub Actions and arrive via the ingest
+# endpoint; boot hydration (below) restores the display state from the
+# findings JSON those runs commit to the repo.
 # Creation order matters: the runner iterates id DESC, so the LAST created
 # due scan runs first - intraday first, weekly/monthly last, so the monthly
 # and weekly baselines run before the intraday passes.
@@ -2023,6 +2030,134 @@ def _seed_basebo_scans() -> None:
         logger.exception("Base Breakout seed failed")
 
 
+# --- Boot hydration: restore displayed findings from the repo ----------------
+# Ingest only helps while the service stays up: scans.db is wiped on every
+# restart, taking last_results with it. The durable record of every GitHub
+# Actions run is the findings JSON the workflows commit back to the repo
+# (findings/<interval>-chunk<i>.json, or a single findings/<interval>.json).
+# On boot, after the seed, a background thread restores each scan's display
+# state from the NEWEST run committed for its interval, through the same
+# storage calls the ingest merge uses - so a later ingest still dedupes
+# against the restored set. Hydration NEVER notifies on Telegram.
+_FINDINGS_REPO_API = ("https://api.github.com/repos/elroeeifrah1111/"
+                      "elroi-terminal/contents/findings")
+_FINDINGS_UA = {"User-Agent": "elroi-terminal",
+                "Accept": "application/vnd.github+json"}
+
+
+def _parse_generated_at(raw) -> float:
+    """ISO-8601 timestamp (the findings files use '...Z') -> epoch
+    seconds; 0 when unparseable."""
+    try:
+        dt = datetime.fromisoformat(str(raw or "").replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except Exception:
+        return 0.0
+
+
+def _fetch_repo_findings() -> Dict[str, List[Dict]]:
+    """Download the repo's findings files, grouped by interval:
+    {interval: [chunk payloads]}. The repo is public, so no auth. Raises
+    when the listing itself fails; one unreadable file is skipped."""
+    resp = requests.get(_FINDINGS_REPO_API, headers=_FINDINGS_UA,
+                        timeout=30)
+    resp.raise_for_status()
+    entries = resp.json()
+    by_interval: Dict[str, List[Dict]] = {}
+    if not isinstance(entries, list):
+        return by_interval
+    for entry in entries:
+        name = entry.get("name") or ""
+        if entry.get("type") != "file" or not name.endswith(".json"):
+            continue
+        stem = name[:-len(".json")]
+        interval = (stem.rsplit("-chunk", 1)[0] if "-chunk" in stem
+                    else stem)
+        url = entry.get("download_url")
+        if not interval or not url:
+            continue
+        try:
+            r = requests.get(url, headers=_FINDINGS_UA, timeout=30)
+            r.raise_for_status()
+            payload = r.json()
+        except Exception:
+            logger.warning("hydration: findings file %s unreadable", name)
+            continue
+        if isinstance(payload, dict):
+            by_interval.setdefault(interval, []).append(payload)
+    return by_interval
+
+
+def _newest_run_findings(payloads: List[Dict]):
+    """Merge one interval's chunk payloads down to its newest run:
+    (run epoch, findings). Chunks are grouped by run_id; a run's epoch
+    is the max generated_at across its chunks. The merge dedupes and
+    sorts exactly like the ingest merge."""
+    runs: Dict[str, List[Dict]] = {}
+    for p in payloads:
+        runs.setdefault(str(p.get("run_id") or ""), []).append(p)
+    best_ts, best = 0.0, []
+    for chunks in runs.values():
+        ts = max((_parse_generated_at(p.get("generated_at"))
+                  for p in chunks), default=0.0)
+        if ts > best_ts:
+            best_ts, best = ts, chunks
+    merged: Dict[str, Dict] = {}
+    for p in best:
+        for f in p.get("findings") or []:
+            if isinstance(f, dict) and f.get("symbol"):
+                f = dict(f)
+                f.setdefault("signal", True)
+                merged[_match_key(f)] = f
+    results = sorted(merged.values(),
+                     key=lambda r: (-(r.get("score") or 0), r["symbol"]))
+    return best_ts, results
+
+
+def _hydrate_scans_from_repo() -> None:
+    """Restore each scan's last_results / last_run from the newest
+    findings run committed to the repo. Runs in a background thread at
+    boot; failure-safe (any error is logged, the terminal keeps serving)
+    and idempotent (a scan is written only when the repo run is newer
+    than its stored last_run). Never notifies on Telegram."""
+    # The unauthenticated GitHub API limit is per egress IP and shared
+    # IPs can be transiently exhausted (observed live 2026-11-25: a 403
+    # on the second of two consecutive boots) - retry the listing a few
+    # times before giving up; this thread never blocks startup either way.
+    by_interval = None
+    for attempt in range(3):
+        try:
+            by_interval = _fetch_repo_findings()
+            break
+        except Exception:
+            if attempt == 2:
+                logger.exception("hydration: findings listing failed")
+                return
+            logger.warning("hydration: listing attempt %d failed - "
+                           "retrying in 45s", attempt + 1)
+            time.sleep(45)
+    for interval, payloads in sorted(by_interval.items()):
+        try:
+            scan = _ingest_find_scan(interval)
+            if scan is None:
+                continue
+            run_ts, results = _newest_run_findings(payloads)
+            if not run_ts or run_ts <= (scan.get("last_run") or 0):
+                continue
+            db_scan_touch(scan["id"], [r["symbol"] for r in results],
+                          results, run_at=run_ts)
+            db_scan_set_notified(
+                scan["id"], sorted(_match_key(r) for r in results))
+            logger.info("hydration: scan #%d (%s) restored %d findings "
+                        "from the repo run @ %s", scan["id"], interval,
+                        len(results),
+                        datetime.fromtimestamp(run_ts).isoformat())
+        except Exception:
+            logger.exception("hydration: interval %s failed", interval)
+
+
 def start_scan_runner():
     global _scan_runner_started
     if _scan_runner_started:
@@ -2030,5 +2165,14 @@ def start_scan_runner():
     _scan_runner_started = True
     _get_db()  # ensure schema exists before serving
     _seed_basebo_scans()  # recreate scans wiped by a restart, if any
-    t = threading.Thread(target=_background_scan_runner, daemon=True)
-    t.start()
+    # Restore the display state the restart wiped, from the repo findings.
+    threading.Thread(target=_hydrate_scans_from_repo, daemon=True).start()
+    # GitHub Actions executes the scheduled passes; the terminal is
+    # display-only. The internal runner remains available behind an env
+    # flag (ELROI_INTERNAL_SCANS=1) for local / manual use.
+    if os.getenv("ELROI_INTERNAL_SCANS", "").strip() == "1":
+        t = threading.Thread(target=_background_scan_runner, daemon=True)
+        t.start()
+    else:
+        logger.info("Internal scan runner disabled "
+                    "(ELROI_INTERNAL_SCANS != '1') - display-only mode")
