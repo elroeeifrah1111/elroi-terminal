@@ -1,0 +1,13 @@
+{
+ "interval": "5m",
+ "period": "5d",
+ "universe": "all_us",
+ "run_id": "45618830962",
+ "chunk_index": 1,
+ "chunks": 4,
+ "generated_at": "2026-11-25T13:01:51Z",
+ "scanned": 1661,
+ "missing": 68,
+ "elapsed_seconds": 199.5,
+ "findings": []
+}
