@@ -2,66 +2,12 @@
  "interval": "30m",
  "period": "1mo",
  "universe": "all_us",
- "run_id": "45618830962",
+ "run_id": "45753880461",
  "chunk_index": 2,
  "chunks": 4,
- "generated_at": "2026-11-25T13:03:48Z",
- "scanned": 1694,
- "missing": 35,
- "elapsed_seconds": 317.1,
- "findings": [
-  {
-   "symbol": "CD",
-   "price": 5.9,
-   "change_pct": -4.22,
-   "signal": true,
-   "score": 2.0,
-   "note": "פריצה טריה",
-   "error": "",
-   "details": {
-    "category": "fresh",
-    "gap_up": false,
-    "zone_low": 5.8667,
-    "zone_high": 6.1333,
-    "zone_break_bar": 65,
-    "breakout_bar": 284,
-    "breakout_date": "2026-11-24",
-    "breakout_price": 6.16,
-    "breakout_volume": 28468.0,
-    "prev_candle_volume": 26583.0,
-    "vol_avg120": 28584.28,
-    "vol_ratio120": 0.996,
-    "vol_window_start": 164,
-    "swing_high_bar": 285,
-    "swing_high_price": 6.17,
-    "up_steps": [],
-    "down_steps": [],
-    "up_steps_ok": false,
-    "down_steps_ok": false,
-    "trigger_vol_plus": false,
-    "trigger_hammer": false,
-    "retest_start_bar": 285,
-    "retest_end_bar": 284,
-    "interval": "30m",
-    "correlation": [
-     {
-      "segment": "breakout",
-      "price_dir": "up",
-      "side": "buyers",
-      "vol_trend": "up",
-      "reading": "bullish",
-      "line": "ווליום פריצה 28,468 מעל הנר הקודם 26,583"
-     },
-     {
-      "segment": "rise",
-      "price_dir": "up",
-      "side": "buyers",
-      "vol_trend": "none",
-      "reading": "neutral",
-      "line": "צ'אנק עליה: עוד אין מספיק נרות קונים לקריאה"
-     }
-    ]
-   }
-  }
- ]
+ "generated_at": "2026-11-26T04:19:55Z",
+ "scanned": 1705,
+ "missing": 25,
+ "elapsed_seconds": 341.1,
+ "findings": []
 }
