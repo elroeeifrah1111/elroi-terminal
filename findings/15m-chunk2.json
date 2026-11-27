@@ -2,89 +2,12 @@
  "interval": "15m",
  "period": "1mo",
  "universe": "all_us",
- "run_id": "45753880461",
+ "run_id": "45939457528",
  "chunk_index": 2,
  "chunks": 4,
- "generated_at": "2026-11-26T04:19:03Z",
- "scanned": 1705,
- "missing": 25,
- "elapsed_seconds": 281.4,
- "findings": [
-  {
-   "symbol": "CD",
-   "price": 5.7,
-   "change_pct": -1.38,
-   "signal": true,
-   "score": 2.5,
-   "note": "פריצת בסיס בבדיקת תמיכה",
-   "error": "",
-   "details": {
-    "category": "retest",
-    "quality": "weak",
-    "gap_up": false,
-    "zone_low": 5.3835,
-    "zone_high": 5.5765,
-    "zone_break_bar": 247,
-    "breakout_bar": 556,
-    "breakout_date": "2026-11-24",
-    "breakout_price": 5.61,
-    "breakout_volume": 9301.0,
-    "prev_candle_volume": 5155.0,
-    "vol_avg120": 11405.08,
-    "vol_ratio120": 0.816,
-    "vol_window_start": 436,
-    "swing_high_bar": 557,
-    "swing_high_price": 5.82,
-    "swing_low_bar": 578,
-    "swing_low_price": 5.55,
-    "low_candle_volume": 45681.0,
-    "up_steps": [
-     13890.0,
-     13725.0,
-     16268.5,
-     14234.0,
-     45485.0
-    ],
-    "down_steps": [
-     31110.0,
-     85403.0,
-     17775.0,
-     63636.0
-    ],
-    "up_steps_ok": false,
-    "down_steps_ok": false,
-    "trigger_vol_plus": false,
-    "trigger_hammer": false,
-    "retest_start_bar": 557,
-    "retest_end_bar": 578,
-    "interval": "15m",
-    "correlation": [
-     {
-      "segment": "breakout",
-      "price_dir": "up",
-      "side": "buyers",
-      "vol_trend": "up",
-      "reading": "bullish",
-      "line": "ווליום פריצה 9,301 מעל הנר הקודם 5,155"
-     },
-     {
-      "segment": "rise",
-      "price_dir": "up",
-      "side": "buyers",
-      "vol_trend": "down",
-      "reading": "bearish",
-      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
-     },
-     {
-      "segment": "retest",
-      "price_dir": "down",
-      "side": "sellers",
-      "vol_trend": "up",
-      "reading": "bearish",
-      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
-     }
-    ]
-   }
-  }
- ]
+ "generated_at": "2026-11-27T04:25:51Z",
+ "scanned": 1696,
+ "missing": 34,
+ "elapsed_seconds": 242.3,
+ "findings": []
 }
