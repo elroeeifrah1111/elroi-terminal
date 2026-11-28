@@ -2,12 +2,84 @@
  "interval": "15m",
  "period": "1mo",
  "universe": "all_us",
- "run_id": "45939457528",
+ "run_id": "46105593213",
  "chunk_index": 2,
  "chunks": 4,
- "generated_at": "2026-11-27T04:25:51Z",
- "scanned": 1696,
- "missing": 34,
- "elapsed_seconds": 242.3,
- "findings": []
+ "generated_at": "2026-11-28T04:05:56Z",
+ "scanned": 1690,
+ "missing": 40,
+ "elapsed_seconds": 230.7,
+ "findings": [
+  {
+   "symbol": "TROX",
+   "price": 2.3,
+   "change_pct": -0.43,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "quality": "weak",
+    "gap_up": false,
+    "zone_low": 1.684,
+    "zone_high": 1.7627,
+    "zone_break_bar": 390,
+    "breakout_bar": 506,
+    "breakout_date": "2026-11-24",
+    "breakout_price": 1.77,
+    "breakout_volume": 123317.0,
+    "prev_candle_volume": 40550.0,
+    "vol_avg120": 334856.95,
+    "vol_ratio120": 0.368,
+    "vol_window_start": 386,
+    "swing_high_bar": 506,
+    "swing_high_price": 1.78,
+    "swing_low_bar": 507,
+    "swing_low_price": 1.75,
+    "low_candle_volume": 61923.0,
+    "up_steps": [
+     129835.33,
+     518647.83,
+     124393.17,
+     164587.5,
+     205964.17
+    ],
+    "down_steps": [],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 506,
+    "retest_end_bar": 507,
+    "interval": "15m",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 123,317 מעל הנר הקודם 40,550"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "down",
+      "reading": "bearish",
+      "line": "עלית קונים דועכת מהפריצה - פריצה חלשה"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  }
+ ]
 }
