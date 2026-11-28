@@ -2,12 +2,12 @@
  "interval": "5m",
  "period": "5d",
  "universe": "all_us",
- "run_id": "45939457528",
+ "run_id": "46105593213",
  "chunk_index": 1,
  "chunks": 4,
- "generated_at": "2026-11-27T04:26:23Z",
- "scanned": 1677,
- "missing": 53,
- "elapsed_seconds": 266.6,
+ "generated_at": "2026-11-28T04:07:01Z",
+ "scanned": 1675,
+ "missing": 55,
+ "elapsed_seconds": 294.0,
  "findings": []
 }
