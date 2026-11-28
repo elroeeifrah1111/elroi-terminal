@@ -2,12 +2,90 @@
  "interval": "15m",
  "period": "1mo",
  "universe": "all_us",
- "run_id": "45939457528",
+ "run_id": "46105593213",
  "chunk_index": 1,
  "chunks": 4,
- "generated_at": "2026-11-27T04:27:14Z",
- "scanned": 1704,
- "missing": 26,
- "elapsed_seconds": 324.2,
- "findings": []
+ "generated_at": "2026-11-28T04:06:25Z",
+ "scanned": 1703,
+ "missing": 27,
+ "elapsed_seconds": 262.8,
+ "findings": [
+  {
+   "symbol": "PAVS",
+   "price": 2.74,
+   "change_pct": -2.84,
+   "signal": true,
+   "score": 2.5,
+   "note": "פריצת בסיס בבדיקת תמיכה",
+   "error": "",
+   "details": {
+    "category": "retest",
+    "gap_up": true,
+    "zone_low": 2.6945,
+    "zone_high": 2.8422,
+    "zone_break_bar": 117,
+    "breakout_bar": 291,
+    "breakout_date": "2026-11-27",
+    "breakout_price": 2.99,
+    "breakout_volume": 15364.0,
+    "prev_candle_volume": 3957.0,
+    "vol_avg120": 9910.42,
+    "vol_ratio120": 1.55,
+    "vol_window_start": 171,
+    "swing_high_bar": 291,
+    "swing_high_price": 3.02,
+    "swing_low_bar": 297,
+    "swing_low_price": 2.73,
+    "low_candle_volume": 2023.0,
+    "up_steps": [],
+    "down_steps": [
+     1607.0,
+     1478.0,
+     644.0,
+     2023.0
+    ],
+    "up_steps_ok": false,
+    "down_steps_ok": false,
+    "trigger_vol_plus": false,
+    "trigger_hammer": false,
+    "retest_start_bar": 291,
+    "retest_end_bar": 297,
+    "interval": "15m",
+    "correlation": [
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "up",
+      "reading": "bullish",
+      "line": "ווליום פריצה 15,364 מעל הנר הקודם 3,957"
+     },
+     {
+      "segment": "rise",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "צ'אנק עליה: עוד אין מספיק נרות קונים לקריאה"
+     },
+     {
+      "segment": "breakout",
+      "price_dir": "up",
+      "side": "buyers",
+      "vol_trend": "none",
+      "reading": "neutral",
+      "line": "הפריצה היתה בגאפ למעלה - רוב הגאפים נסגרים מתישהו (דגל אזהרה)"
+     },
+     {
+      "segment": "retest",
+      "price_dir": "down",
+      "side": "sellers",
+      "vol_trend": "up",
+      "reading": "bearish",
+      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
+     }
+    ]
+   }
+  }
+ ]
 }
