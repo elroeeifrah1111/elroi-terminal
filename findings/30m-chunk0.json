@@ -2,88 +2,12 @@
  "interval": "30m",
  "period": "1mo",
  "universe": "all_us",
- "run_id": "45939457528",
+ "run_id": "46105593213",
  "chunk_index": 0,
  "chunks": 4,
- "generated_at": "2026-11-27T04:25:37Z",
- "scanned": 1705,
- "missing": 26,
- "elapsed_seconds": 223.4,
- "findings": [
-  {
-   "symbol": "RAYA",
-   "price": 0.63,
-   "change_pct": -3.08,
-   "signal": true,
-   "score": 2.5,
-   "note": "פריצת בסיס בבדיקת תמיכה",
-   "error": "",
-   "details": {
-    "category": "retest",
-    "gap_up": true,
-    "zone_low": 0.4891,
-    "zone_high": 0.6009,
-    "zone_break_bar": 102,
-    "breakout_bar": 212,
-    "breakout_date": "2026-11-25",
-    "breakout_price": 0.62,
-    "breakout_volume": 69566519.0,
-    "prev_candle_volume": 8306.0,
-    "vol_avg120": 831437.21,
-    "vol_ratio120": 83.67,
-    "vol_window_start": 92,
-    "swing_high_bar": 212,
-    "swing_high_price": 0.99,
-    "swing_low_bar": 218,
-    "swing_low_price": 0.55,
-    "low_candle_volume": 1372022.0,
-    "up_steps": [],
-    "down_steps": [
-     833092.0,
-     1372022.0
-    ],
-    "up_steps_ok": false,
-    "down_steps_ok": false,
-    "trigger_vol_plus": false,
-    "trigger_hammer": false,
-    "retest_start_bar": 212,
-    "retest_end_bar": 218,
-    "interval": "30m",
-    "correlation": [
-     {
-      "segment": "breakout",
-      "price_dir": "up",
-      "side": "buyers",
-      "vol_trend": "up",
-      "reading": "bullish",
-      "line": "ווליום פריצה 69,566,519 מעל הנר הקודם 8,306"
-     },
-     {
-      "segment": "rise",
-      "price_dir": "up",
-      "side": "buyers",
-      "vol_trend": "none",
-      "reading": "neutral",
-      "line": "צ'אנק עליה: עוד אין מספיק נרות קונים לקריאה"
-     },
-     {
-      "segment": "breakout",
-      "price_dir": "up",
-      "side": "buyers",
-      "vol_trend": "none",
-      "reading": "neutral",
-      "line": "הפריצה היתה בגאפ למעלה - רוב הגאפים נסגרים מתישהו (דגל אזהרה)"
-     },
-     {
-      "segment": "retest",
-      "price_dir": "down",
-      "side": "sellers",
-      "vol_trend": "up",
-      "reading": "bearish",
-      "line": "צ'אנק בדיקה: ווליום מוכרים לא דועך"
-     }
-    ]
-   }
-  }
- ]
+ "generated_at": "2026-11-28T04:06:34Z",
+ "scanned": 1694,
+ "missing": 36,
+ "elapsed_seconds": 270.0,
+ "findings": []
 }
